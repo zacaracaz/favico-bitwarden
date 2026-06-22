@@ -1,0 +1,10 @@
+# Bitwarden vault backups the tool writes (encrypted, but never publish them)
+backups/
+bw-backup*.json
+
+node_modules/
+*.log
+.DS_Store
+
+# env files, just in case
+.env*
