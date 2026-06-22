@@ -162,19 +162,20 @@ async function classify(onProgress) {
   });
   const byName = (a, b) => a.name.localeCompare(b.name);
   const renames = logins
-    .map((it) => ({ id: it.id, current: it.name || "(no name)", suggested: suggestClean(it.name) }))
+    .map((it) => ({ id: it.id, current: it.name || "(no name)", suggested: suggestClean(it.name), host: it.login.uris.map((u) => hostOf(u.uri)).find(Boolean) || null }))
     .filter((r) => r.suggested)
     .sort((a, b) => a.current.localeCompare(b.current));
 
-  // Likely-duplicate logins, grouped by site + username (or name). Detection uses
-  // ONLY non-secret fields — passwords are never read or compared.
+  // Likely-duplicate logins. Grouped strictly: the SAME site host plus the same
+  // username (or, when there's no username, the same host + same name). Using the full
+  // host (not just the brand) avoids lumping different services of one company together.
+  // Detection uses ONLY non-secret fields — passwords are never read or compared.
   const dmap = new Map();
   for (const it of logins) {
     const host = it.login.uris.map((u) => hostOf(u.uri)).find(Boolean) || null;
-    const brand = brandOf(host) || host || null;
+    if (!host) continue;
     const user = (it.login.username || "").trim().toLowerCase();
-    if (!brand && !user) continue;
-    const key = (brand || "?") + "|" + (user || "name:" + (it.name || "").trim().toLowerCase());
+    const key = user ? host + "|" + user : host + "|name:" + (it.name || "").trim().toLowerCase();
     if (!dmap.has(key)) dmap.set(key, []);
     dmap.get(key).push({ id: it.id, name: it.name || "(no name)", host, username: it.login.username || "" });
   }
@@ -471,17 +472,35 @@ function renderIcons(key,opts){
   return wrap;
 }
 
+async function pickIcon(e, cell){
+  const known=plan.icons[e.id]||'';
+  const picked=await openPicker({ search:known, name:known });
+  if(!picked)return;
+  const setC=(cand)=>{ plan.icons[e.id]=cand; cell.innerHTML=\`<img src="https://\${cand}.favico.app/favicon.ico" onerror="this.style.visibility='hidden'">\`; };
+  if(picked.cand){ setC(picked.cand); return; }
+  if(picked.upload){ const old=cell.innerHTML; cell.innerHTML='<span class="noicon">…</span>';
+    try{ const res=await (await fetch('/api/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:picked.upload.name,dataUrl:picked.upload.dataUrl})})).json();
+      if(res.ok) setC(res.cand); else cell.innerHTML=old;
+    }catch{ cell.innerHTML=old; } }
+}
+
 function renderRenames(){
   const wrap=$('<div data-step="renames"></div>');
   const rn=data.renames||[];
-  wrap.appendChild($('<p class="hint">Cleaner names for entries that look like URLs or package IDs. Edit a suggestion before applying if needed — only ticked rows are renamed.</p>'));
+  wrap.appendChild($('<p class="hint">Cleaner names for entries that look like URLs or package IDs. Edit a suggestion before applying — only ticked rows are renamed. You can also change an entry\\'s icon here.</p>'));
   if(!rn.length){ wrap.appendChild($('<p class="hint">No rename suggestions.</p>')); return wrap; }
   wrap.appendChild($('<label class="selall"><input type="checkbox" class="allchk"> Select all</label>'));
   const holder=$('<div></div>');
   for(const e of rn){
     const val=(e.id in plan.renames)?plan.renames[e.id]:e.suggested;
     const ck=(e.id in plan.renames)?'checked':'';
-    holder.appendChild($(\`<div class="row" data-id="\${e.id}"><input type="checkbox" class="cr" \${ck}><div class="grow"><div class="host">\${esc(e.current)}</div></div><span class="arrow">→</span><input type="text" class="newname" value="\${esc(val)}" style="flex:1;min-width:0;padding:5px 8px;border:1px solid #8886;border-radius:7px;font:inherit"></div>\`));
+    const row=$(\`<div class="row" data-id="\${e.id}"><input type="checkbox" class="cr" \${ck}><span class="iconcell"></span><div class="grow"><div class="host">\${esc(e.current)}</div></div><span class="arrow">→</span><input type="text" class="newname" value="\${esc(val)}" style="flex:1;min-width:0;padding:5px 8px;border:1px solid #8886;border-radius:7px;font:inherit"><button class="change">Change icon</button></div>\`);
+    const cell=row.querySelector('.iconcell');
+    if(plan.icons[e.id]) cell.innerHTML=\`<img src="https://\${plan.icons[e.id]}.favico.app/favicon.ico" onerror="this.style.visibility='hidden'">\`;
+    else if(e.host) cell.innerHTML=\`<img src="https://icons.bitwarden.net/\${e.host}/icon.png" onerror="this.style.visibility='hidden'">\`;
+    else cell.innerHTML='<span class="noicon">?</span>';
+    row.querySelector('.change').onclick=()=>pickIcon(e, cell);
+    holder.appendChild(row);
   }
   wrap.appendChild(holder);
   wrap.querySelector('.allchk').onchange=(ev)=>{ holder.querySelectorAll('.cr').forEach(c=>c.checked=ev.target.checked); refreshNav(); };
@@ -493,11 +512,11 @@ function renderDups(){
   const wrap=$('<div data-step="dups"></div>');
   const dups=data.dups||[];
   if(!dups.length){ wrap.appendChild($('<p class="hint">No duplicate logins detected. 🎉</p>')); return wrap; }
-  wrap.appendChild($('<p class="hint">Logins that look like duplicates — grouped by <b>site + username</b>. Tick any to move to Bitwarden <b>Trash</b> (recoverable from Trash, via <code>bw restore</code>, or your encrypted backup). Keep at least one per group. <b>Passwords are never read or compared</b>, so review before ticking.</p>'));
+  wrap.appendChild($('<p class="hint">Likely duplicates — grouped only when the <b>site address and username match</b>. Tick any to move to Bitwarden <b>Trash</b> (recoverable from Trash, via <code>bw restore</code>, or your encrypted backup). Keep at least one per group. <b style="color:#dc2626">Passwords are never read or compared</b>, so review before ticking.</p>'));
   dups.forEach(g=>{
     const box=$('<div class="dupgroup"></div>');
     box.appendChild($(\`<div class="duphdr">\${esc(g[0].host||g[0].name)} · \${g.length} entries</div>\`));
-    g.forEach(en=>{ const ck=plan.deletes[en.id]?'checked':''; box.appendChild($(\`<label class="dup" data-id="\${en.id}"><input type="checkbox" class="cd" \${ck}><span class="grow"><span class="name">\${esc(en.name)}</span><span class="host">\${esc(en.username||'no username')}\${en.host?(' · '+esc(en.host)):''}</span></span></label>\`)); });
+    g.forEach(en=>{ const ck=plan.deletes[en.id]?'checked':''; const ic=en.host?\`<img src="https://icons.bitwarden.net/\${en.host}/icon.png" onerror="this.style.visibility='hidden'">\`:'<span class="noicon">?</span>'; box.appendChild($(\`<label class="dup" data-id="\${en.id}"><input type="checkbox" class="cd" \${ck}><span class="iconcell">\${ic}</span><span class="grow"><span class="name">\${esc(en.name)}</span><span class="host">\${esc(en.username||'no username')}\${en.host?(' · '+esc(en.host)):''}</span></span></label>\`)); });
     wrap.appendChild(box);
   });
   wrap.addEventListener('change',refreshNav);
@@ -509,7 +528,7 @@ function renderConfirm(){
   const icons=Object.entries(plan.icons), renames=Object.entries(plan.renames), deletes=Object.keys(plan.deletes);
   wrap.appendChild($('<p class="hint">Review everything below. <b>Nothing has changed in your vault yet</b> — changes apply only when you click Apply.</p>'));
   wrap.appendChild($(\`<div class="summary"><span><b>\${icons.length}</b> icon\${icons.length===1?'':'s'}</span><span><b>\${renames.length}</b> rename\${renames.length===1?'':'s'}</span><span><b>\${deletes.length}</b> to Trash</span></div>\`));
-  if(icons.length){ const sec=$('<div class="csec"><h3>Icons</h3></div>'); icons.forEach(([id,cand])=>{ const e=iconIndex[id]||{}; const rep=e._sec==='s3'; sec.appendChild($(\`<div class="crow"><img class="ci" src="https://\${cand}.favico.app/favicon.ico" onerror="this.style.visibility='hidden'"><span class="grow"><span class="name">\${esc(e.name||id)}</span><span class="host">\${rep?'replace':'add'} → \${esc(cand)}.favico.app\${e.host?(' · '+esc(e.host)):''}</span></span></div>\`)); }); wrap.appendChild(sec); }
+  if(icons.length){ const sec=$('<div class="csec"><h3>Icons</h3></div>'); icons.forEach(([id,cand])=>{ const r=renameIndex[id]; const e=iconIndex[id]||dupIndex[id]||(r?{name:r.current,host:r.host}:null)||{}; const rep=e._sec==='s3'; sec.appendChild($(\`<div class="crow"><img class="ci" src="https://\${cand}.favico.app/favicon.ico" onerror="this.style.visibility='hidden'"><span class="grow"><span class="name">\${esc(e.name||id)}</span><span class="host">\${rep?'replace':'add'} → \${esc(cand)}.favico.app\${e.host?(' · '+esc(e.host)):''}</span></span></div>\`)); }); wrap.appendChild(sec); }
   if(renames.length){ const sec=$('<div class="csec"><h3>Renames</h3></div>'); renames.forEach(([id,name])=>{ const e=renameIndex[id]||{}; sec.appendChild($(\`<div class="crow"><span class="grow"><span class="name">\${esc(name)}</span><span class="host">was: \${esc(e.current||'')}</span></span></div>\`)); }); wrap.appendChild(sec); }
   if(deletes.length){ const sec=$('<div class="csec"><h3>Move to Trash</h3></div>'); sec.appendChild($('<p class="hint">Recoverable from Bitwarden Trash, <code>bw restore item &lt;id&gt;</code>, or your encrypted backup.</p>')); deletes.forEach(id=>{ const e=dupIndex[id]||{}; sec.appendChild($(\`<div class="crow"><span class="grow"><span class="name">\${esc(e.name||id)}</span><span class="host">\${esc(e.username||'no username')}\${e.host?(' · '+esc(e.host)):''}</span></span></div>\`)); }); wrap.appendChild(sec); }
   if(!icons.length&&!renames.length&&!deletes.length) wrap.appendChild($('<p class="hint">No changes selected. Go back to pick some — or just close the tool, nothing will happen.</p>'));
