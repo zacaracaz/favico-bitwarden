@@ -69,6 +69,11 @@ const askYes = async (q) => /^y(es)?$/i.test(await ask(q + dim(" [y/N] ")));
 
 async function main() {
   console.log(bold("\n  favico × Bitwarden — guided setup\n"));
+  console.log("  Bitwarden shows the favicon of the site each login points at — but many");
+  console.log("  entries have no icon, or the wrong one. favico.app hosts custom icons at");
+  console.log('  name.favico.app; this tool adds one as an entry\'s first web address (set to');
+  console.log('  "never autofill"), so Bitwarden shows the icon while your real login URL');
+  console.log("  still works exactly as before.\n");
   console.log("  This runs " + bold("entirely on your machine") + ". Your vault is decrypted locally");
   console.log("  via the official Bitwarden CLI — your master password and secrets never leave");
   console.log("  this computer. An " + bold("encrypted backup") + " is made before anything, and " + bold("nothing"));

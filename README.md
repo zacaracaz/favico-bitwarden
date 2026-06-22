@@ -1,10 +1,41 @@
 # favico × Bitwarden
 
-A small, **local** tool that gives your Bitwarden / Vaultwarden logins real icons.
+Give your Bitwarden / Vaultwarden logins **real icons**.
 
-It adds `name.favico.app` as an entry's first URI with **match = Never**, so Bitwarden
-shows that favicon while your real URL just moves down and **autofill is unaffected**.
-Along the way it can suggest cleaner entry names and flag likely-duplicate logins.
+## What is favico?
+
+Bitwarden shows the **favicon of the website** each login points at (it fetches it
+from the domain in the entry's URL). The catch: lots of entries have **no icon**, or
+a generic placeholder — so your vault ends up a wall of look-alike tiles.
+
+**favico.app** is a small service that hosts custom icons, each at its own subdomain
+— e.g. `netflix.favico.app` serves a Netflix icon. **This tool** is a local, guided
+wizard that connects to your vault, finds the entries without good icons, and lets you
+pick one from a library, search the web, or upload your own.
+
+## How it adds the icon to a Bitwarden item
+
+Bitwarden takes an entry's icon from its **first** web address (URI 1). So the tool:
+
+1. Inserts `https://name.favico.app` as **URI 1**, with its **match detection set to
+   "Never"** — Bitwarden will *show that icon* but will *never* use that address for
+   autofill.
+2. Pushes your **real login URL down to URI 2**, where it still matches and autofills
+   exactly as before.
+
+```text
+Before:
+  URI 1  https://login.example.com      (icon: none)
+
+After:
+  URI 1  https://example.favico.app      match = Never     ← icon comes from here
+  URI 2  https://login.example.com       match = default   ← still autofills
+```
+
+Nothing else about the entry changes, and it's reversible anytime — the wizard has a
+**"Revert all favico URIs"** button that strips out everything it added.
+
+Along the way it can also suggest cleaner entry names and flag likely-duplicate logins.
 
 ## Run it
 
