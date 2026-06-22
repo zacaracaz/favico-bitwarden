@@ -386,6 +386,10 @@ small{opacity:.6}
 .grid .ic.sel{border-color:#2563eb;background:#2563eb22;box-shadow:0 0 0 1px #2563eb inset}
 .crop-wrap{margin-top:10px;border-top:1px solid #8884;padding-top:8px}
 .zoomrow{display:flex;align-items:center;gap:8px}.zoomrow input{flex:1}
+.bgrow{display:flex;align-items:center;gap:10px;margin-top:8px;font-size:13px}
+.bgrow label{display:inline-flex;align-items:center;gap:5px;cursor:pointer}
+.bgrow input[type=color]{width:44px;height:26px;padding:0;border:1px solid #8886;border-radius:6px;background:none;cursor:pointer}
+.checker{background-image:linear-gradient(45deg,#8884 25%,transparent 25%),linear-gradient(-45deg,#8884 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#8884 75%),linear-gradient(-45deg,transparent 75%,#8884 75%);background-size:14px 14px;background-position:0 0,0 7px,7px -7px,-7px 0}
 </style></head><body>
 <h1>favico × Bitwarden</h1>
 <p class="sub">A guided review of your logins. Adds <code>name.favico.app</code> as URI&nbsp;1 (match&nbsp;=&nbsp;Never) so Bitwarden shows the icon; your real URL moves down and still autofills. <b>Nothing is written to your vault until the final Apply step.</b></p>
@@ -619,7 +623,8 @@ function openPicker(opts){
 
       <div class="crop-wrap" hidden>
         <div class="cropbox"><img></div>
-        <div class="zoomrow"><small>Zoom</small><input type="range" class="zoom" min="1" max="5" step="0.01" value="1"></div>
+        <div class="zoomrow"><small>Zoom</small><input type="range" class="zoom" min="0.2" max="5" step="0.01" value="1"><small>out ⟷ in</small></div>
+        <div class="bgrow"><span>Background:</span><label><input type="checkbox" class="bgtransparent" checked> Transparent</label><input type="color" class="bgcolor" value="#ffffff" title="Background colour"></div>
         <div class="previews">\${SIZES.map(s=>\`<div style="text-align:center"><div class="p" style="width:\${s}px;height:\${s}px"><img></div><div style="font-size:10px;opacity:.6">\${s}px</div></div>\`).join('')}</div>
         <label class="fld">Save as <small>(library name — how it’s stored &amp; searchable by others)</small><input type="text" class="cname" placeholder="e.g. bunnings"></label>
       </div>
@@ -629,6 +634,7 @@ function openPicker(opts){
     document.body.appendChild(bg);
     const q1=(s)=>bg.querySelector(s);
     const cropWrap=q1('.crop-wrap'),box=q1('.cropbox'),img=q1('.cropbox img'),zoom=q1('.zoom'),nameI=q1('.cname'),err=q1('.cerr'),pimgs=[...bg.querySelectorAll('.previews .p img')];
+    const bgTransparent=q1('.bgtransparent'),bgColor=q1('.bgcolor'),pPanels=[...bg.querySelectorAll('.previews .p')];
     const libQ=q1('.lib-q'),libRes=q1('.lib-results'),webQ=q1('.web-q'),webGo=q1('.web-go'),webRes=q1('.web-results'),upFile=q1('.up-file');
     let mode='library', libPick=null, iw=0,ih=0,z=1,ox=0,oy=0,drag=null,objUrl=null;
     webQ.value=opts.search||''; nameI.value=opts.name||'';
@@ -636,7 +642,8 @@ function openPicker(opts){
     // crop engine (shared by web + upload)
     const base=()=>Math.max(V/iw,V/ih);
     const dims=()=>{const ds=base()*z;return {dw:iw*ds,dh:ih*ds};};
-    function draw(){ let {dw,dh}=dims(); ox=Math.min(0,Math.max(V-dw,ox)); oy=Math.min(0,Math.max(V-dh,oy));
+    const clampOff=(o,d)=> d<=V ? Math.min(V-d,Math.max(0,o)) : Math.min(0,Math.max(V-d,o));
+    function draw(){ let {dw,dh}=dims(); ox=clampOff(ox,dw); oy=clampOff(oy,dh);
       img.style.left=ox+'px';img.style.top=oy+'px';img.style.width=dw+'px';img.style.height=dh+'px';
       pimgs.forEach((pi,i)=>{const k=SIZES[i]/V;pi.style.left=(ox*k)+'px';pi.style.top=(oy*k)+'px';pi.style.width=(dw*k)+'px';pi.style.height=(dh*k)+'px';}); }
     img.onload=()=>{ iw=img.naturalWidth;ih=img.naturalHeight; z=1; zoom.value=1; const {dw,dh}=dims(); ox=(V-dw)/2;oy=(V-dh)/2; pimgs.forEach(pi=>pi.src=img.src); cropWrap.hidden=false; draw(); };
@@ -646,6 +653,10 @@ function openPicker(opts){
     box.onpointerdown=(ev)=>{ if(!iw)return; drag={x:ev.clientX,y:ev.clientY,ox,oy};box.setPointerCapture(ev.pointerId);};
     box.onpointermove=(ev)=>{ if(!drag)return; ox=drag.ox+(ev.clientX-drag.x); oy=drag.oy+(ev.clientY-drag.y); draw(); };
     box.onpointerup=()=>{drag=null;};
+    function applyBg(el){ if(bgTransparent.checked){ el.classList.add('checker'); el.style.backgroundColor=''; } else { el.classList.remove('checker'); el.style.backgroundColor=bgColor.value; } }
+    function updateBg(){ applyBg(box); pPanels.forEach(applyBg); }
+    bgTransparent.onchange=updateBg; bgColor.oninput=()=>{ bgTransparent.checked=false; updateBg(); };
+    updateBg();
 
     // tabs
     function setMode(m){ mode=m; err.textContent='';
@@ -687,6 +698,7 @@ function openPicker(opts){
       if(!iw){ err.textContent=(mode==='web')?'Search, then click a result to select it.':'Choose an image file first.'; return; }
       if(!name){ err.textContent='Enter a library name to save it as.'; return; }
       const c=document.createElement('canvas');c.width=OUT;c.height=OUT;const ctx=c.getContext('2d');const {dw,dh}=dims();const sf=OUT/V;
+      if(!bgTransparent.checked){ ctx.fillStyle=bgColor.value; ctx.fillRect(0,0,OUT,OUT); }
       try{ ctx.drawImage(img, ox*sf, oy*sf, dw*sf, dh*sf); close({upload:{name, dataUrl:c.toDataURL('image/png')}}); }catch{ err.textContent='That image blocked cropping — try another.'; } };
 
     // prefill the library tab with the suggested term so matches show immediately
