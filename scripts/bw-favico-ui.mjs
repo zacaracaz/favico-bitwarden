@@ -433,12 +433,14 @@ function rowBase(e){ const img=e.iconUrl?\`<img src="\${e.iconUrl}" onerror="thi
   return \`\${img}<div class="grow"><div class="name">\${esc(e.name)}</div><div class="host">\${esc(e.host||'no web URL')}</div></div>\`; }
 function esc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 
+// Order: declutter (remove duplicates) → identify (rename) → beautify (icons) → review.
+// Entries you mark for removal in step 1 are hidden from the later steps.
 const STEPS=[
+  {key:'dups',title:'Duplicates',render:renderDups},
+  {key:'renames',title:'Rename',render:renderRenames},
   {key:'s1',title:'Matched',render:()=>renderIcons('s1',{pre:true,hint:'A matching icon was found for each entry that has none. Untick any you do not want; fix a wrong match with the search or upload.'})},
   {key:'s2',title:'Pick icons',render:()=>renderIcons('s2',{hint:'No icon and no automatic match. Search the library, search the web, or upload one — picking an icon ticks the row.'})},
   {key:'s3',title:'Replace',render:()=>renderIcons('s3',{current:true,hint:'These already have an icon. Optional: pick a replacement; rows you leave untouched keep their current icon.'})},
-  {key:'renames',title:'Rename',render:renderRenames},
-  {key:'dups',title:'Duplicates',render:renderDups},
   {key:'confirm',title:'Review',render:renderConfirm},
 ];
 
@@ -465,7 +467,7 @@ function stepper(){
 function renderIcons(key,opts){
   opts=opts||{};
   const wrap=$(\`<div data-step="\${key}"></div>\`);
-  const list=data[key]||[];
+  const list=(data[key]||[]).filter(e=>!plan.deletes[e.id]);
   if(opts.hint) wrap.appendChild($(\`<p class="hint">\${opts.hint}</p>\`));
   if(!list.length){ wrap.appendChild($('<p class="hint">Nothing in this section. 🎉</p>')); return wrap; }
   if(key!=='s3') wrap.appendChild($('<label class="selall"><input type="checkbox" class="allchk"'+(key==='s1'?' checked':'')+'> Select all</label>'));
@@ -495,7 +497,7 @@ async function pickIcon(e, cell){
 
 function renderRenames(){
   const wrap=$('<div data-step="renames"></div>');
-  const rn=data.renames||[];
+  const rn=(data.renames||[]).filter(e=>!plan.deletes[e.id]);
   wrap.appendChild($('<p class="hint">Cleaner names for entries that look like URLs or package IDs. Edit a suggestion before applying — only ticked rows are renamed. You can also change an entry\\'s icon here.</p>'));
   if(!rn.length){ wrap.appendChild($('<p class="hint">No rename suggestions.</p>')); return wrap; }
   wrap.appendChild($('<label class="selall"><input type="checkbox" class="allchk"> Select all</label>'));
@@ -563,7 +565,7 @@ function collect(){
   const key=step.dataset.step; visited[key]=true;
   if(key==='s1'||key==='s2'||key==='s3'){ step.querySelectorAll('.row[data-id]').forEach(r=>{ const id=r.dataset.id, cb=r.querySelector('.cpick'); if(cb&&cb.checked&&r.dataset.cand) plan.icons[id]=r.dataset.cand; else delete plan.icons[id]; }); }
   else if(key==='renames'){ step.querySelectorAll('.row[data-id]').forEach(r=>{ const id=r.dataset.id, cb=r.querySelector('.cr'), nm=r.querySelector('.newname').value.trim(); if(cb.checked&&nm) plan.renames[id]=nm; else delete plan.renames[id]; }); }
-  else if(key==='dups'){ step.querySelectorAll('.dup[data-id]').forEach(r=>{ const id=r.dataset.id; if(r.querySelector('.cd').checked) plan.deletes[id]=true; else delete plan.deletes[id]; }); }
+  else if(key==='dups'){ step.querySelectorAll('.dup[data-id]').forEach(r=>{ const id=r.dataset.id; if(r.querySelector('.cd').checked){ plan.deletes[id]=true; delete plan.icons[id]; delete plan.renames[id]; } else delete plan.deletes[id]; }); }
 }
 
 function countTicks(){
