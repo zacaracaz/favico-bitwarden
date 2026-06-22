@@ -63,6 +63,14 @@ function bwStatus() {
   catch { return null; }
 }
 
+function serverLabel(u) {
+  if (!u) return "bitwarden.com (US, default)";
+  const h = u.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  if (h.includes("bitwarden.eu")) return h + " (EU)";
+  if (h.includes("bitwarden.com")) return h + " (US)";
+  return h + " (self-hosted)";
+}
+
 const rl = createInterface({ input: stdin, output: stdout });
 const ask = async (q) => (await rl.question(q)).trim();
 const askYes = async (q) => /^y(es)?$/i.test(await ask(q + dim(" [y/N] ")));
@@ -107,7 +115,7 @@ async function main() {
     st = bwStatus();
     if (!st || st.status === "unauthenticated") { fail("Login didn't complete. Re-run when you're ready."); process.exit(1); }
   }
-  ok(`Logged in as ${st.userEmail || "(your account)"}`);
+  ok(`Logged in as ${st.userEmail || "(your account)"} on ${serverLabel(st.serverUrl)}`);
 
   // 3 ── Unlock → capture session ─────────────────────────────────────
   console.log(bold("\n  Step 3 of 4 — Unlock your vault"));

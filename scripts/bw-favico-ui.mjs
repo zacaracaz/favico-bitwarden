@@ -63,6 +63,15 @@ function bw(args) {
   return runBw(args, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
 }
 
+// Friendly label for the Bitwarden server region from `bw status`.serverUrl.
+function serverLabel(u) {
+  if (!u) return "bitwarden.com (US, default)";
+  const h = u.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  if (h.includes("bitwarden.eu")) return h + " (EU)";
+  if (h.includes("bitwarden.com")) return h + " (US)";
+  return h + " (self-hosted)";
+}
+
 const MULTI = new Set(["co.uk","org.uk","ac.uk","gov.uk","com.au","net.au","org.au","co.nz","co.jp","co.kr","co.in","com.br","com.cn","com.mx","com.tr","co.za","com.sg","com.hk","com.tw","com.ua","co.il","com.ar","com.co","com.my"]);
 const VALID = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 const hostOf = (uri) => { try { const u = new URL(uri.includes("://") ? uri : `https://${uri}`); return /^https?:$/.test(u.protocol) ? u.hostname.replace(/^www\./, "").toLowerCase() : null; } catch { return null; } };
@@ -812,7 +821,7 @@ async function main() {
     console.error("    Re-run:  $env:BW_SESSION = bw unlock --raw   (then start this again)\n");
     process.exit(1);
   }
-  console.error(`  ✓ Vault unlocked for ${st.userEmail}`);
+  console.error(`  ✓ Vault unlocked for ${st.userEmail} on ${serverLabel(st.serverUrl)}`);
 
   if (process.argv.includes("--no-backup")) {
     console.error("Skipping backup (--no-backup).");
