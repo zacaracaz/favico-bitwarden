@@ -713,7 +713,8 @@ function iconRow(e, opts){
   const label=hasInitial?'Select a different icon…':'Choose an icon…';
   const row=$(\`<div class="row" data-id="\${e.id}"><input type="checkbox" class="cpick"><span class="iconcell"></span><div class="grow"><div class="name">\${esc(e.name)}</div><div class="host">\${esc(e.host||'no web URL')}</div></div><button class="change">\${label}</button><span class="state"></span></div>\`);
   const cb=row.querySelector('.cpick'), cell=row.querySelector('.iconcell'), state=row.querySelector('.state');
-  const defName=((e.host||e.name||'').toLowerCase().replace(/^www\\./,'').split('.')[0].replace(/[^a-z0-9-]/g,'')).slice(0,63);
+  // No brand-name guessing: prefill the picker only when this row already has a
+  // confirmed favico name (e.g. a Section 1 match). Otherwise leave the fields blank.
   function showIcon(url,title){ cell.innerHTML=\`<img src="\${url}" title="\${title||''}" onerror="this.style.visibility='hidden'">\`; }
   function setChosen(cand){ row.dataset.cand=cand; showIcon('https://'+cand+'.favico.app/favicon.ico', cand+'.favico.app'); cb.checked=true; row.querySelector('.change').textContent='Select a different icon…'; refreshNav(); }
   // initial icon shown in the left cell
@@ -721,7 +722,7 @@ function iconRow(e, opts){
   else if(opts.current&&e.iconUrl) showIcon(e.iconUrl,'current icon');
   else cell.innerHTML='<span class="noicon">?</span>';
   row.querySelector('.change').onclick=async()=>{
-    const picked=await openPicker({ search:defName, name:defName });
+    const known=row.dataset.cand||''; const picked=await openPicker({ search:known, name:known });
     if(!picked)return;
     if(picked.cand){ setChosen(picked.cand); return; }
     if(picked.upload){ state.textContent='Uploading…';
