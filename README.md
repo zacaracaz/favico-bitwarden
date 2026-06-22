@@ -8,23 +8,31 @@ Along the way it can suggest cleaner entry names and flag likely-duplicate login
 
 ## Run it
 
-You need:
-- **Node.js 20+** — <https://nodejs.org>
-- **Bitwarden CLI** — `npm install -g @bitwarden/cli`
-- A Bitwarden account
+The only thing you must already have is a **Bitwarden account** — the launcher
+offers to install everything else it needs:
 
-Then, from this folder:
+- **Node.js** — if it's missing, the wrapper installs it for you: `start.cmd`
+  uses **winget** (Windows); `start.sh` uses **Homebrew / apt / dnf / pacman**
+  (macOS/Linux). Each asks first.
+- **Bitwarden CLI** — `start.mjs` offers to install it via **npm** if missing.
 
-```
-node start.mjs
-```
+Then just:
 
-(Windows: double-click `start.cmd`. macOS/Linux: `./start.sh`.)
+- **Windows:** double-click **`start.cmd`**
+- **macOS / Linux:** run **`./start.sh`**
+- **Any OS (Node already installed):** `node start.mjs`
 
-The launcher walks you through everything, narrating each step: it checks the
+The launcher walks you through everything, narrating each step: installs/checks
 prerequisites, logs you in only if needed, unlocks your vault (your master
 password stays hidden), makes an **encrypted backup**, and opens a 6-step wizard
 in your browser.
+
+> On Windows, the very first run after a fresh Node install may say *"Node was
+> installed but this window needs reopening"* — just close it and double-click
+> `start.cmd` again (a one-time PATH refresh).
+
+If you'd rather install the prerequisites yourself: Node.js from
+<https://nodejs.org>, then `npm install -g @bitwarden/cli`.
 
 ## What the wizard does
 
