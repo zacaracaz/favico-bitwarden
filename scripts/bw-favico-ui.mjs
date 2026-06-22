@@ -385,7 +385,12 @@ small{opacity:.6}
 .grid .ic span{font-size:9px;max-width:50px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.7}
 .grid .ic.sel{border-color:#2563eb;background:#2563eb22;box-shadow:0 0 0 1px #2563eb inset}
 .crop-wrap{margin-top:10px;border-top:1px solid #8884;padding-top:8px}
-.zoomrow{display:flex;align-items:center;gap:8px}.zoomrow input{flex:1}
+.zoomrow{display:flex;align-items:center;gap:8px}.zoomrow input[type=range]{flex:1}
+.zreset{padding:4px 10px;font-size:12px}
+.seg{display:inline-flex;border:1px solid #8886;border-radius:7px;overflow:hidden}
+.seg .bgopt{border:none;border-radius:0;background:#8881;padding:5px 11px;font-size:12px;cursor:pointer}
+.seg .bgopt+.bgopt{border-left:1px solid #8886}
+.seg .bgopt.on{background:#2563eb;color:#fff}
 .bgrow{display:flex;align-items:center;gap:10px;margin-top:8px;font-size:13px}
 .bgrow label{display:inline-flex;align-items:center;gap:5px;cursor:pointer}
 .bgrow input[type=color]{width:44px;height:26px;padding:0;border:1px solid #8886;border-radius:6px;background:none;cursor:pointer}
@@ -623,8 +628,8 @@ function openPicker(opts){
 
       <div class="crop-wrap" hidden>
         <div class="cropbox"><img></div>
-        <div class="zoomrow"><small>Zoom</small><input type="range" class="zoom" min="0.2" max="5" step="0.01" value="1"><small>out ⟷ in</small></div>
-        <div class="bgrow"><span>Background:</span><label><input type="checkbox" class="bgtransparent" checked> Transparent</label><input type="color" class="bgcolor" value="#ffffff" title="Background colour"></div>
+        <div class="zoomrow"><small>Zoom</small><input type="range" class="zoom" min="0.2" max="5" step="0.01" value="1"><button type="button" class="zreset">Reset</button></div>
+        <div class="bgrow"><span>Background:</span><div class="seg"><button type="button" class="bgopt on" data-bg="transparent">Transparent</button><button type="button" class="bgopt" data-bg="solid">Solid colour</button></div><input type="color" class="bgcolor" value="#ffffff" title="Background colour" hidden></div>
         <div class="previews">\${SIZES.map(s=>\`<div style="text-align:center"><div class="p" style="width:\${s}px;height:\${s}px"><img></div><div style="font-size:10px;opacity:.6">\${s}px</div></div>\`).join('')}</div>
         <label class="fld">Save as <small>(library name — how it’s stored &amp; searchable by others)</small><input type="text" class="cname" placeholder="e.g. bunnings"></label>
       </div>
@@ -634,7 +639,8 @@ function openPicker(opts){
     document.body.appendChild(bg);
     const q1=(s)=>bg.querySelector(s);
     const cropWrap=q1('.crop-wrap'),box=q1('.cropbox'),img=q1('.cropbox img'),zoom=q1('.zoom'),nameI=q1('.cname'),err=q1('.cerr'),pimgs=[...bg.querySelectorAll('.previews .p img')];
-    const bgTransparent=q1('.bgtransparent'),bgColor=q1('.bgcolor'),pPanels=[...bg.querySelectorAll('.previews .p')];
+    const bgOpts=[...bg.querySelectorAll('.bgopt')],bgColor=q1('.bgcolor'),pPanels=[...bg.querySelectorAll('.previews .p')];
+    let bgMode='transparent';
     const libQ=q1('.lib-q'),libRes=q1('.lib-results'),webQ=q1('.web-q'),webGo=q1('.web-go'),webRes=q1('.web-results'),upFile=q1('.up-file');
     let mode='library', libPick=null, iw=0,ih=0,z=1,ox=0,oy=0,drag=null,objUrl=null;
     webQ.value=opts.search||''; nameI.value=opts.name||'';
@@ -650,13 +656,17 @@ function openPicker(opts){
     function loadFile(f){ if(objUrl)URL.revokeObjectURL(objUrl); objUrl=URL.createObjectURL(f); img.crossOrigin=null; img.src=objUrl; }
     function loadUrl(u){ const tryL=(src,viaProxy)=>{ img.crossOrigin='anonymous'; img.onerror=()=>{ if(viaProxy){ err.textContent="Couldn't load that image — try another"; } else tryL(FAVICO+'/api/imageproxy?url='+encodeURIComponent(u), true); }; img.src=src; }; tryL(u,false); }
     zoom.oninput=()=>{ if(!iw)return; const nz=+zoom.value, oldS=base()*z, cx=(V/2-ox)/oldS, cy=(V/2-oy)/oldS; z=nz; const ns=base()*z; ox=V/2-cx*ns; oy=V/2-cy*ns; draw(); };
+    function resetView(){ if(!iw)return; z=1; zoom.value=1; const {dw,dh}=dims(); ox=(V-dw)/2; oy=(V-dh)/2; draw(); }
+    bg.querySelector('.zreset').onclick=resetView;
     box.onpointerdown=(ev)=>{ if(!iw)return; drag={x:ev.clientX,y:ev.clientY,ox,oy};box.setPointerCapture(ev.pointerId);};
     box.onpointermove=(ev)=>{ if(!drag)return; ox=drag.ox+(ev.clientX-drag.x); oy=drag.oy+(ev.clientY-drag.y); draw(); };
     box.onpointerup=()=>{drag=null;};
-    function applyBg(el){ if(bgTransparent.checked){ el.classList.add('checker'); el.style.backgroundColor=''; } else { el.classList.remove('checker'); el.style.backgroundColor=bgColor.value; } }
+    function applyBg(el){ if(bgMode==='transparent'){ el.classList.add('checker'); el.style.backgroundColor=''; } else { el.classList.remove('checker'); el.style.backgroundColor=bgColor.value; } }
     function updateBg(){ applyBg(box); pPanels.forEach(applyBg); }
-    bgTransparent.onchange=updateBg; bgColor.oninput=()=>{ bgTransparent.checked=false; updateBg(); };
-    updateBg();
+    function selectBg(m){ bgMode=m; bgOpts.forEach(b=>b.classList.toggle('on',b.dataset.bg===m)); bgColor.hidden=(m!=='solid'); updateBg(); }
+    bgOpts.forEach(b=>b.onclick=()=>selectBg(b.dataset.bg));
+    bgColor.oninput=()=>{ selectBg('solid'); };
+    selectBg('transparent');
 
     // tabs
     function setMode(m){ mode=m; err.textContent='';
@@ -698,7 +708,7 @@ function openPicker(opts){
       if(!iw){ err.textContent=(mode==='web')?'Search, then click a result to select it.':'Choose an image file first.'; return; }
       if(!name){ err.textContent='Enter a library name to save it as.'; return; }
       const c=document.createElement('canvas');c.width=OUT;c.height=OUT;const ctx=c.getContext('2d');const {dw,dh}=dims();const sf=OUT/V;
-      if(!bgTransparent.checked){ ctx.fillStyle=bgColor.value; ctx.fillRect(0,0,OUT,OUT); }
+      if(bgMode==='solid'){ ctx.fillStyle=bgColor.value; ctx.fillRect(0,0,OUT,OUT); }
       try{ ctx.drawImage(img, ox*sf, oy*sf, dw*sf, dh*sf); close({upload:{name, dataUrl:c.toDataURL('image/png')}}); }catch{ err.textContent='That image blocked cropping — try another.'; } };
 
     // prefill the library tab with the suggested term so matches show immediately
