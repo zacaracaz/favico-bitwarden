@@ -211,6 +211,27 @@ function applyFavico(id, cand) {
   bw(["edit", "item", id, Buffer.from(JSON.stringify(it)).toString("base64")]);
 }
 
+// Apply a rename and/or an icon to one item in a SINGLE edit, so each item is
+// written exactly once. Editing the same item twice in a run fails with
+// Bitwarden's "item is out of date" (the first edit bumps its revisionDate).
+function applyChanges(id, { cand, name }) {
+  const it = byId.get(id);
+  if (!it) throw new Error("unknown item");
+  if (name !== undefined) {
+    const nm = (name || "").trim().slice(0, 200);
+    if (!nm) throw new Error("empty name");
+    it.name = nm;
+  }
+  if (cand !== undefined) {
+    if (!VALID.test(cand)) throw new Error("invalid icon name");
+    const uris = it.login.uris || [];
+    // drop any existing favico URI, then add the chosen one as URI 1 (no stacking)
+    const rest = uris.filter((u) => { const h = hostOf(u.uri); return !(h && (h === ROOT || h.endsWith(`.${ROOT}`))); });
+    it.login.uris = [{ match: MATCH_NEVER, uri: `https://${cand}.${ROOT}` }, ...rest];
+  }
+  bw(["edit", "item", id, Buffer.from(JSON.stringify(it)).toString("base64")]);
+}
+
 function deleteItem(id) {
   const it = byId.get(id);
   if (!it) throw new Error("unknown item");
@@ -297,8 +318,20 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/commit") {
       const { icons = [], renames = [], deletes = [] } = await readJson(req);
       const results = { icons: [], renames: [], deletes: [] };
-      for (const { id, cand } of icons) { try { applyFavico(id, cand); results.icons.push({ id, ok: true }); } catch (e) { results.icons.push({ id, ok: false, error: e.message }); } }
-      for (const { id, name } of renames) { try { applyRename(id, name); results.renames.push({ id, ok: true }); } catch (e) { results.renames.push({ id, ok: false, error: e.message }); } }
+      // Merge per-item changes so each item is edited only once.
+      const changes = new Map();
+      for (const { id, cand } of icons) { const c = changes.get(id) || {}; c.cand = cand; changes.set(id, c); }
+      for (const { id, name } of renames) { const c = changes.get(id) || {}; c.name = name; changes.set(id, c); }
+      for (const [id, c] of changes) {
+        try {
+          applyChanges(id, c);
+          if (c.cand !== undefined) results.icons.push({ id, ok: true });
+          if (c.name !== undefined) results.renames.push({ id, ok: true });
+        } catch (e) {
+          if (c.cand !== undefined) results.icons.push({ id, ok: false, error: e.message });
+          if (c.name !== undefined) results.renames.push({ id, ok: false, error: e.message });
+        }
+      }
       for (const id of deletes) { try { deleteItem(id); results.deletes.push({ id, ok: true }); } catch (e) { results.deletes.push({ id, ok: false, error: e.message }); } }
       return send(res, 200, { results });
     }
