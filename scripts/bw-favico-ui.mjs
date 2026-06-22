@@ -360,6 +360,7 @@ const HTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewp
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
 :root{color-scheme:light dark}
+.brandword{background:linear-gradient(143deg,#ff8a1e 0%,#ff3d5f 24%,#f02d86 46%,#b23be0 64%,#7a3df2 82%,#2e5bff 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
 body{font-family:system-ui,sans-serif;max-width:880px;margin:0 auto;padding:24px;line-height:1.4}
 h1{margin:0 0 4px}.sub{opacity:.6;font-size:14px;margin:0 0 20px}
 h2{font-size:16px;margin:28px 0 6px}.hint{opacity:.6;font-size:13px;margin:0 0 10px}
@@ -439,7 +440,7 @@ small{opacity:.6}
 .bgrow input[type=color]{width:44px;height:26px;padding:0;border:1px solid #8886;border-radius:6px;background:none;cursor:pointer}
 .checker{background-image:linear-gradient(45deg,#8884 25%,transparent 25%),linear-gradient(-45deg,#8884 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#8884 75%),linear-gradient(-45deg,transparent 75%,#8884 75%);background-size:14px 14px;background-position:0 0,0 7px,7px -7px,-7px 0}
 </style></head><body>
-<h1>favico × Bitwarden</h1>
+<h1><span class="brandword">favico</span> × Bitwarden</h1>
 <p class="sub">A guided review of your logins. Adds <code>name.favico.app</code> as URI&nbsp;1 (match&nbsp;=&nbsp;Never) so Bitwarden shows the icon; your real URL moves down and still autofills. <b>Nothing is written to your vault until the final Apply step.</b></p>
 <details class="notice"><summary>🔒 What leaves your machine</summary>
 <ul>
