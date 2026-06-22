@@ -646,7 +646,7 @@ function openPicker(opts){
     webQ.value=opts.search||''; nameI.value=opts.name||'';
 
     // crop engine (shared by web + upload)
-    const base=()=>Math.max(V/iw,V/ih);
+    const base=()=>Math.min(V/iw,V/ih);
     const dims=()=>{const ds=base()*z;return {dw:iw*ds,dh:ih*ds};};
     const clampOff=(o,d)=> d<=V ? Math.min(V-d,Math.max(0,o)) : Math.min(0,Math.max(V-d,o));
     function draw(){ let {dw,dh}=dims(); ox=clampOff(ox,dw); oy=clampOff(oy,dh);
