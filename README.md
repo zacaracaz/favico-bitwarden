@@ -37,6 +37,24 @@ Nothing else about the entry changes, and it's reversible anytime — the wizard
 
 Along the way it can also suggest cleaner entry names and flag likely-duplicate logins.
 
+## Get it
+
+**Easiest — download the ZIP (no tools needed):** on this
+[GitHub page](https://github.com/zacaracaz/favico-bitwarden), click the green
+**`<> Code`** button → **Download ZIP**, then unzip it.
+
+**Or clone it (if you have git):**
+
+```bash
+git clone https://github.com/zacaracaz/favico-bitwarden.git
+```
+
+Then open the folder and follow **Run it** below.
+
+> Tips: on Windows a freshly-downloaded `start.cmd` may trigger SmartScreen —
+> click *More info → Run anyway*. On macOS/Linux from a ZIP, launch with
+> `bash start.sh` (a ZIP drops the file's executable bit).
+
 ## Run it
 
 The only thing you must already have is a **Bitwarden account** — the launcher
