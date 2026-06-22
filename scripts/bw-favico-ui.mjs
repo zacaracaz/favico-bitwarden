@@ -643,7 +643,7 @@ function openPicker(opts){
     let bgMode='transparent';
     const libQ=q1('.lib-q'),libRes=q1('.lib-results'),webQ=q1('.web-q'),webGo=q1('.web-go'),webRes=q1('.web-results'),upFile=q1('.up-file');
     let mode='library', libPick=null, iw=0,ih=0,z=1,ox=0,oy=0,drag=null,objUrl=null;
-    webQ.value=opts.search||''; nameI.value=opts.name||'';
+    webQ.value=opts.search||''; let nameTouched=false; nameI.oninput=()=>{nameTouched=true;};
 
     // crop engine (shared by web + upload)
     const base=()=>Math.min(V/iw,V/ih);
@@ -688,7 +688,7 @@ function openPicker(opts){
     async function webSearch(){ const q=webQ.value.trim(); if(q.length<2){err.textContent='Type something to search for first.';return;} err.textContent=''; webRes.innerHTML='<small>searching…</small>';
       try{ const d=await (await fetch(FAVICO+'/api/imagesearch?q='+encodeURIComponent(q))).json(); webRes.innerHTML='';
         (d.results||[]).forEach(r=>{ const b=$('<button class="ic" title="'+esc(r.title||r.source||'')+'"><img></button>'); const im=b.querySelector('img'); im.onerror=()=>b.remove(); im.src=r.url;
-          b.onclick=()=>{ webRes.querySelectorAll('.ic').forEach(x=>x.classList.remove('sel')); b.classList.add('sel'); if(!nameI.value.trim()) nameI.value=q.toLowerCase().replace(/[^a-z0-9-]/g,'').slice(0,63); loadUrl(r.url); }; webRes.appendChild(b); });
+          b.onclick=()=>{ webRes.querySelectorAll('.ic').forEach(x=>x.classList.remove('sel')); b.classList.add('sel'); if(!nameTouched) nameI.value=q.toLowerCase().replace(/[^a-z0-9-]/g,'').slice(0,63); loadUrl(r.url); }; webRes.appendChild(b); });
         if(!webRes.children.length) webRes.innerHTML='<small>no results</small>';
       }catch{ webRes.innerHTML='<small class="err">search failed</small>'; } }
     webGo.onclick=webSearch; webQ.onkeydown=(e)=>{ if(e.key==='Enter'){e.preventDefault();webSearch();} };
@@ -696,12 +696,14 @@ function openPicker(opts){
     // upload
     const fileInput=$('<input type="file" accept="image/*" style="display:none">'); bg.appendChild(fileInput);
     upFile.onclick=()=>fileInput.click();
-    fileInput.onchange=()=>{ const f=fileInput.files[0]; fileInput.value=''; if(!f)return; loadFile(f); };
+    fileInput.onchange=()=>{ const f=fileInput.files[0]; fileInput.value=''; if(!f)return; if(!nameTouched) nameI.value=f.name.replace(/\\.[^.]*$/,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,63); loadFile(f); };
 
     // finish
     function close(r){ if(objUrl)URL.revokeObjectURL(objUrl); bg.remove(); resolve(r); }
     bg.querySelector('.ccancel').onclick=()=>close(null);
-    bg.onclick=(ev)=>{ if(ev.target===bg) close(null); };
+    let downOnBg=false;
+    bg.addEventListener('mousedown',(ev)=>{ downOnBg=(ev.target===bg); });
+    bg.onclick=(ev)=>{ if(ev.target===bg && downOnBg) close(null); };
     bg.querySelector('.cgo').onclick=()=>{
       if(mode==='library'){ if(!libPick){err.textContent='Click an icon in the results to select it first.';return;} close({cand:libPick}); return; }
       const name=nameI.value.trim();
