@@ -113,8 +113,9 @@ const RENAME_MULTI = new Set(["com.au","co.uk","co.nz","com.br","co.jp","co.in",
 const GENERIC_SEG = new Set(["app","apps","android","androidapp","ios","mobile","client","prod","production","main","www","web","beta","release","free","lite","music","studio","core","ui","tv","game","games","cam","camera","battery","security","home","smart","smarthome","life","hub","connect","control","remote","watch","wear","health","fit","fitness","tracker","device","devices","scanner","manager","portal","account","login","auth"]);
 function splitWords(seg){ return (seg||"").replace(/[_-]+/g," ").replace(/([a-z])([A-Z])/g,"$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g,"$1 $2").trim(); }
 function titleCase(s){ return splitWords(s).split(/\s+/).filter(Boolean).map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(" "); }
-// Identity-provider login domains: the brand lives in the tenant subdomain, not here.
-const IDP_DOMAINS = new Set(["b2clogin.com","okta.com","oktapreview.com","okta-emea.com","auth0.com","onelogin.com","microsoftonline.com","pingone.com"]);
+// Multi-tenant platform domains (identity providers + SaaS): the brand lives in the
+// tenant subdomain, not in the platform domain itself.
+const TENANT_HOSTS = new Set(["b2clogin.com","okta.com","oktapreview.com","okta-emea.com","auth0.com","onelogin.com","microsoftonline.com","pingone.com","redcatcloud.com.au","myshopify.com"]);
 // Pull a brand out of a tenant label like "prodcompassionaub2c" → "compassion".
 function cleanTenant(t){
   let x=(t||"").toLowerCase();
@@ -141,17 +142,20 @@ function suggestClean(raw){
     const li=parts.length-1;
     if(parts.length>=4 && parts[li].length>2 && !GENERIC_SEG.has(parts[li])) brand=partsOrig[li];
     else brand=parts[1];
-  } else if(IDP_DOMAINS.has(parts.slice(-2).join(".")) && parts.length>=3){
-    // identity-provider login domain (Azure B2C, Okta, Auth0…) — the brand is the
-    // tenant subdomain, not the provider. e.g. prodcompassionaub2c.b2clogin.com
-    const cleaned=cleanTenant(parts[0]);
-    brand = cleaned.length>=3 ? cleaned : parts[0];
   } else {
     const last2=parts.slice(-2).join(".");
-    const idx=(RENAME_MULTI.has(last2)&&parts.length>=3)?parts.length-3:parts.length-2;
-    if(idx<0) return null;
-    brand=parts[idx];
-    if(idx>0 && parts[0]==="api") suffix=" API";  // api.printnode.com → Printnode API
+    const reg=(RENAME_MULTI.has(last2)&&parts.length>=3)?parts.slice(-3).join("."):last2;
+    if(TENANT_HOSTS.has(reg) && parts.length>reg.split(".").length){
+      // multi-tenant platform (Azure B2C, Okta, Auth0, Redcat, Shopify…) — the brand
+      // is the tenant subdomain, not the platform. e.g. schnitz.redcatcloud.com.au
+      const cleaned=cleanTenant(parts[0]);
+      brand = cleaned.length>=3 ? cleaned : parts[0];
+    } else {
+      const idx=(RENAME_MULTI.has(last2)&&parts.length>=3)?parts.length-3:parts.length-2;
+      if(idx<0) return null;
+      brand=parts[idx];
+      if(idx>0 && parts[0]==="api") suffix=" API";  // api.printnode.com → Printnode API
+    }
   }
   if(!brand || brand.length<2) return null;
   const clean=titleCase(brand)+suffix;
@@ -914,7 +918,9 @@ function openPicker(opts){
     // crop engine (shared by web + upload)
     const base=()=>Math.min(V/iw,V/ih);
     const dims=()=>{const ds=base()*z;return {dw:iw*ds,dh:ih*ds};};
-    const clampOff=(o,d)=> d<=V ? Math.min(V-d,Math.max(0,o)) : Math.min(0,Math.max(V-d,o));
+    // Allow dragging past the edges (logos often need centring/padding); just keep
+    // ~20% of the image on-canvas so it can't be lost. Gaps fill with the background.
+    const clampOff=(o,d)=>{ const keep=Math.min(d,V)*0.2; return Math.min(V-keep, Math.max(keep-d, o)); };
     function draw(){ let {dw,dh}=dims(); ox=clampOff(ox,dw); oy=clampOff(oy,dh);
       img.style.left=ox+'px';img.style.top=oy+'px';img.style.width=dw+'px';img.style.height=dh+'px';
       pimgs.forEach((pi,i)=>{const k=SIZES[i]/V;pi.style.left=(ox*k)+'px';pi.style.top=(oy*k)+'px';pi.style.width=(dw*k)+'px';pi.style.height=(dh*k)+'px';}); }
