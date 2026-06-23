@@ -663,7 +663,7 @@ function renderRenames(){
     else if(e.host) cell.innerHTML=\`<img src="https://icons.bitwarden.net/\${e.host}/icon.png" onerror="this.style.visibility='hidden'">\`;
     else cell.innerHTML='<span class="noicon">?</span>';
     const okmsg=$('<div class="iconok" hidden></div>');
-    row.querySelector('.change').onclick=async()=>{ const cand=await pickIcon(e, cell); if(cand){ okmsg.hidden=false; okmsg.innerHTML='✓ Icon updated to <b>'+esc(cand)+'.favico.app</b> — this applies on its own. Tick the box only if you also want to rename this entry.'; } };
+    row.querySelector('.change').onclick=async()=>{ const cand=await pickIcon(e, cell); if(cand){ okmsg.hidden=false; okmsg.innerHTML='Icon will be updated to <b>'+esc(cand)+'.favico.app</b> — this applies on its own. Tick the box if you also want to rename this entry.'; } };
     const item=$('<div class="rnitem"></div>'); item.appendChild(row); item.appendChild(okmsg); holder.appendChild(item);
   }
   wrap.appendChild(holder);
