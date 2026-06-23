@@ -35,9 +35,9 @@ const BW_ICONS = "https://icons.bitwarden.net";
 const MATCH_NEVER = 5;
 
 // favico funnel mark — served locally so the tool's own tab shows the brand icon (no network needed)
-const ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+const ICON_SVG = `<svg id="Layer_1" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 600 600">
   <defs>
-    <linearGradient id="favico" x1="10" y1="4" x2="54" y2="62" gradientUnits="userSpaceOnUse">
+    <linearGradient id="favico" x1="93.75" y1="37.5" x2="506.25" y2="581.25" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#FF8A1E"/>
       <stop offset="0.24" stop-color="#FF3D5F"/>
       <stop offset="0.46" stop-color="#F02D86"/>
@@ -45,11 +45,14 @@ const ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
       <stop offset="0.82" stop-color="#7A3DF2"/>
       <stop offset="1" stop-color="#2E5BFF"/>
     </linearGradient>
+    <style>
+      .st0 { fill: url(#favico); stroke: url(#favico); stroke-miterlimit: 10; }
+    </style>
   </defs>
-  <rect x="4" y="5" width="56" height="11" rx="5.5" fill="url(#favico)"/>
-  <rect x="9" y="20" width="46" height="11" rx="5.5" fill="url(#favico)"/>
-  <rect x="16.5" y="35" width="31" height="11" rx="5.5" fill="url(#favico)"/>
-  <polygon points="23,51 41,51 32,61" fill="url(#favico)" stroke="url(#favico)" stroke-width="4" stroke-linejoin="round"/>
+  <path class="st0" d="M113.35,100c-27.61,0-50,22.39-50,50v300c0,27.61,22.39,50,50,50s50-22.39,50-50V150c0-27.61-22.39-50-50-50Z"/>
+  <path class="st0" d="M234.06,150c-27.61,0-50,22.39-50,50v200c0,27.61,22.39,50,50,50s50-22.39,50-50v-200c0-27.61-22.39-50-50-50Z"/>
+  <path class="st0" d="M354.78,200c-27.61,0-50,22.39-50,50v100c0,27.61,22.39,50,50,50s50-22.39,50-50v-100c0-27.61-22.39-50-50-50Z"/>
+  <path class="st0" d="M541.13,275.09l-81.16-33.25c-16.45-6.74-34.48,5.36-34.48,23.13v66.51c0,17.78,18.03,29.87,34.48,23.13l81.16-33.25c20.7-8.48,20.7-37.79,0-46.27Z"/>
 </svg>`;
 
 const isWin = process.platform === "win32";
