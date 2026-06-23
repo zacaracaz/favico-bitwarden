@@ -941,10 +941,17 @@ function openPicker(opts){
     selectBg('transparent');
 
     // tabs
-    function setMode(m){ mode=m; err.textContent='';
+    function setMode(m){
+      // carry the typed query across the two search tabs so it isn't lost on switch
+      if(m==='web' && mode==='library' && libQ.value) webQ.value=libQ.value;
+      else if(m==='library' && mode==='web' && webQ.value) libQ.value=webQ.value;
+      mode=m; err.textContent='';
       bg.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.m===m));
       bg.querySelectorAll('.pane').forEach(p=>p.hidden=p.dataset.pane!==m);
-      cropWrap.hidden=(m==='library')||!iw; }
+      cropWrap.hidden=(m==='library')||!iw;
+      if(m==='library') libSearch();
+      else if(m==='web' && webQ.value.trim()) webSearch();
+    }
     bg.querySelectorAll('.tab').forEach(t=>t.onclick=()=>setMode(t.dataset.m));
 
     // library search
