@@ -419,38 +419,67 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/commit") {
       const { icons = [], renames = [], deletes = [], merges = [], report = false, synonyms = [] } = await readJson(req);
       const results = { icons: [], renames: [], deletes: [], merges: [] };
-      // Run planned merges first (combine duplicates) so the surviving entry is
-      // refreshed before any icon/rename edit targets it.
-      for (const m of merges) {
-        try { const r = mergeItems(m.ids || [], m.keep); results.merges.push({ ok: true, id: m.keep, ...r }); }
-        catch (e) { results.merges.push({ ok: false, id: m && m.keep, error: e.message }); }
-      }
-      // Merge per-item changes so each item is edited only once.
+      // Stream NDJSON progress so the browser can show a live bar + per-item log.
+      res.writeHead(200, { "Content-Type": "application/x-ndjson", "Cache-Control": "no-cache" });
+      const emit = (o) => { try { res.write(JSON.stringify(o) + "\n"); } catch { /* client gone */ } };
+      const nameOf = (id) => { const it = byId.get(id); return (it && it.name) || id; };
+      // Per-item changes (each item edited once).
       const changes = new Map();
       for (const { id, cand } of icons) { const c = changes.get(id) || {}; c.cand = cand; changes.set(id, c); }
       for (const { id, name } of renames) { const c = changes.get(id) || {}; c.name = name; changes.set(id, c); }
+      const total = merges.length + changes.size + deletes.length;
+      let done = 0;
+      const finish = (label, ok, error) => { done++; emit({ type: "done_item", done, total, label, ok, error }); };
+      const tick = () => new Promise((r) => setImmediate(r)); // yield so each chunk flushes
       const hints = [], iconMatches = [], uses = []; // opted-in sharing
-      for (const [id, c] of changes) {
-        const it = byId.get(id);
-        const before = it?.name;
-        let host = null;
-        for (const u of (it?.login?.uris || [])) { const hh = hostOf(u.uri); if (hh && !(hh === ROOT || hh.endsWith(`.${ROOT}`))) { host = hh; break; } }
-        try {
-          applyChanges(id, c);
-          if (c.cand !== undefined) { results.icons.push({ id, ok: true }); uses.push(c.cand); if (host) iconMatches.push({ host, cand: c.cand }); }
-          if (c.name !== undefined) { results.renames.push({ id, ok: true }); if (before && before !== c.name) hints.push({ from: before, to: c.name }); }
-        } catch (e) {
-          if (c.cand !== undefined) results.icons.push({ id, ok: false, error: e.message });
-          if (c.name !== undefined) results.renames.push({ id, ok: false, error: e.message });
+      try {
+        emit({ type: "start", total });
+        // 1) merges first (so the surviving entry is fresh before icon/rename edits)
+        for (const m of merges) {
+          const label = `Merging duplicates of “${nameOf(m.keep)}”`;
+          emit({ type: "doing", label }); await tick();
+          try { const r = mergeItems(m.ids || [], m.keep); results.merges.push({ ok: true, id: m.keep, ...r }); finish(label, true); }
+          catch (e) { results.merges.push({ ok: false, id: m && m.keep, error: e.message }); finish(label, false, e.message); }
         }
+        // 2) icon and/or rename per item
+        for (const [id, c] of changes) {
+          const it = byId.get(id);
+          const before = it?.name;
+          const label = (c.cand !== undefined && c.name !== undefined) ? `Updating “${before || id}”`
+            : (c.cand !== undefined) ? `Setting icon for “${before || id}”`
+            : `Renaming “${before || id}” → “${c.name}”`;
+          emit({ type: "doing", label }); await tick();
+          let host = null;
+          for (const u of (it?.login?.uris || [])) { const hh = hostOf(u.uri); if (hh && !(hh === ROOT || hh.endsWith(`.${ROOT}`))) { host = hh; break; } }
+          try {
+            applyChanges(id, c);
+            if (c.cand !== undefined) { results.icons.push({ id, ok: true }); uses.push(c.cand); if (host) iconMatches.push({ host, cand: c.cand }); }
+            if (c.name !== undefined) { results.renames.push({ id, ok: true }); if (before && before !== c.name) hints.push({ from: before, to: c.name }); }
+            finish(label, true);
+          } catch (e) {
+            if (c.cand !== undefined) results.icons.push({ id, ok: false, error: e.message });
+            if (c.name !== undefined) results.renames.push({ id, ok: false, error: e.message });
+            finish(label, false, e.message);
+          }
+        }
+        // 3) deletes (soft-delete to Trash)
+        for (const id of deletes) {
+          const label = `Moving “${nameOf(id)}” to Trash`;
+          emit({ type: "doing", label }); await tick();
+          try { deleteItem(id); results.deletes.push({ id, ok: true }); finish(label, true); }
+          catch (e) { results.deletes.push({ id, ok: false, error: e.message }); finish(label, false, e.message); }
+        }
+        // 4) opt-in anonymous hints (best-effort, timeout-capped so the stream can't hang)
+        if (report && (hints.length || iconMatches.length || uses.length || (synonyms || []).length)) {
+          emit({ type: "doing", label: "Sharing anonymous hints" });
+          try { await fetch(`${FAVICO}/api/learn`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ renames: hints, iconMatches, uses, synonyms }), signal: AbortSignal.timeout(FETCH_TIMEOUT) }); } catch { /* best-effort */ }
+        }
+        emit({ type: "done", results });
+      } catch (e) {
+        emit({ type: "error", error: e.message, results });
       }
-      for (const id of deletes) { try { deleteItem(id); results.deletes.push({ id, ok: true }); } catch (e) { results.deletes.push({ id, ok: false, error: e.message }); } }
-      // Opt-in: share generic, anonymous hints (renames, icon matches, search picks,
-      // icon usage). No IDs, URLs, passwords, or full entries.
-      if (report && (hints.length || iconMatches.length || uses.length || (synonyms || []).length)) {
-        try { await fetch(`${FAVICO}/api/learn`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ renames: hints, iconMatches, uses, synonyms }) }); } catch { /* best-effort */ }
-      }
-      return send(res, 200, { results });
+      res.end();
+      return;
     }
     if (req.method === "POST" && url.pathname === "/api/revert") {
       const n = revertAll();
@@ -561,6 +590,13 @@ small{opacity:.6}
 .optdesc{font-size:12px;opacity:.72;margin-top:3px;line-height:1.45}
 .dupgroup.willmerge{border-color:#16a34a}
 .iconok{font-size:12px;color:#16a34a;margin:-2px 0 8px 40px}
+.pbar{height:10px;background:#8883;border-radius:6px;overflow:hidden;margin:8px 0}
+.pfill{height:100%;width:0;background:#2563eb;transition:width .25s}
+.pmeta{display:flex;align-items:center;gap:10px;font-size:12px;opacity:.85}
+.pcur{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pdet{font:inherit;font-size:12px;padding:2px 8px}
+.plog{max-height:200px;overflow:auto;font-size:12px;margin:8px 0;padding-left:20px}
+.plog li{margin:2px 0}.plog li.ok{color:#16a34a}.plog li.bad{color:#dc2626}
 .switch{position:relative;display:inline-block;width:44px;height:24px;flex:0 0 auto;cursor:pointer;margin-top:2px}
 .switch input{opacity:0;width:0;height:0}
 .switch .track{position:absolute;inset:0;background:#8886;border-radius:999px;transition:background .15s}
@@ -856,16 +892,37 @@ async function commit(apply,dl){
   downloadRecord();
   apply.disabled=true; dl.disabled=true;
   const res=document.getElementById('commitresult');
-  res.innerHTML='<div class="proc">⏳ Processing '+total+' change'+(total===1?'':'s')+'… don’t close this window.</div>';
+  res.innerHTML='<div class="proc"><div class="pbar"><div class="pfill"></div></div><div class="pmeta"><span class="ppct">0%</span><span class="pcur">Starting…</span><button class="pdet">Show details</button></div><ul class="plog" hidden></ul><div class="phint">Working… please don’t close this window.</div></div>';
+  const fill=res.querySelector('.pfill'),pct=res.querySelector('.ppct'),cur=res.querySelector('.pcur'),log=res.querySelector('.plog'),det=res.querySelector('.pdet');
+  det.onclick=()=>{ log.hidden=!log.hidden; det.textContent=log.hidden?'Show details':'Hide details'; };
+  let results=null;
+  function onEvent(e){
+    if(e.type==='doing'){ cur.textContent=e.label; }
+    else if(e.type==='done_item'){ const p=e.total?Math.round(e.done/e.total*100):100; fill.style.width=p+'%'; pct.textContent=p+'%';
+      const li=document.createElement('li'); li.className=e.ok?'ok':'bad'; li.textContent=(e.ok?'✓ ':'✗ ')+e.label+(e.ok?'':' — '+(e.error||'failed')); log.appendChild(li); log.scrollTop=log.scrollHeight; }
+    else if(e.type==='done'){ results=e.results; fill.style.width='100%'; pct.textContent='100%'; cur.textContent='Done'; renderSummary(); }
+    else if(e.type==='error'){ results=e.results||results; cur.innerHTML='<span class="err">'+esc(e.error||'failed')+'</span>'; renderSummary(); }
+  }
+  function renderSummary(){
+    if(committed) return; committed=true;
+    const r=results||{icons:[],renames:[],deletes:[],merges:[]};
+    const sum=a=>({ok:(a||[]).filter(x=>x.ok).length,n:(a||[]).length});
+    const si=sum(r.icons),sr=sum(r.renames),sd=sum(r.deletes),sm=sum(r.merges);
+    const fails=[...(r.icons||[]),...(r.renames||[]),...(r.deletes||[]),...(r.merges||[])].filter(x=>!x.ok);
+    let h='<div class="done">✓ Applied.</div><div class="summary"><span>Icons '+si.ok+'/'+si.n+'</span><span>Renames '+sr.ok+'/'+sr.n+'</span><span>Merges '+sm.ok+'/'+sm.n+'</span><span>Trash '+sd.ok+'/'+sd.n+'</span></div>';
+    if(fails.length) h+='<p class="err">'+fails.length+' failed — open “Show details” above to see which.</p>';
+    h+='<p class="hint">Open Bitwarden and <b>Sync</b> to see the changes. Your change record was downloaded.</p>';
+    const box=document.createElement('div'); box.innerHTML=h; res.insertBefore(box,res.firstChild);
+    const ph=res.querySelector('.phint'); if(ph) ph.remove();
+  }
   try{
-    const r=await (await fetch('/api/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({icons,renames,deletes,merges,report:consent.report,synonyms:pendingSynonyms})})).json();
-    const sum=a=>({ok:a.filter(x=>x.ok).length,n:a.length});
-    const si=sum(r.results.icons),sr=sum(r.results.renames),sd=sum(r.results.deletes),sm=sum(r.results.merges||[]);
-    const fails=[...r.results.icons,...r.results.renames,...r.results.deletes,...(r.results.merges||[])].filter(x=>!x.ok);
-    let html='<div class="done">✓ Done.</div><div class="summary"><span>Icons '+si.ok+'/'+si.n+'</span><span>Renames '+sr.ok+'/'+sr.n+'</span><span>Merges '+sm.ok+'/'+sm.n+'</span><span>Trash '+sd.ok+'/'+sd.n+'</span></div>';
-    if(fails.length) html+='<p class="err">'+fails.length+' failed:</p><ul>'+fails.map(f=>'<li class="err">'+esc(f.id)+': '+esc(f.error||'failed')+'</li>').join('')+'</ul>';
-    html+='<p class="hint">Open Bitwarden and <b>Sync</b> to see the changes. Your change record was downloaded.</p>';
-    res.innerHTML=html; committed=true;
+    const resp=await fetch('/api/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({icons,renames,deletes,merges,report:consent.report,synonyms:pendingSynonyms})});
+    if(!resp.body){ const r=await resp.json(); results=r.results; renderSummary(); return; }
+    const reader=resp.body.getReader(),dec=new TextDecoder(); let buf='';
+    for(;;){ const {value,done}=await reader.read(); if(done) break; buf+=dec.decode(value,{stream:true});
+      let nl; while((nl=buf.indexOf('\\n'))>=0){ const line=buf.slice(0,nl).trim(); buf=buf.slice(nl+1); if(line) onEvent(JSON.parse(line)); } }
+    const tail=buf.trim(); if(tail) onEvent(JSON.parse(tail));
+    if(!committed) renderSummary();
   }catch(e){ res.innerHTML='<div class="err">Apply failed: '+esc(e.message||'error')+'. Check Bitwarden to see what applied.</div>'; apply.disabled=false; dl.disabled=false; }
 }
 // Unified icon picker: three clearly-separated ways to choose an icon.
