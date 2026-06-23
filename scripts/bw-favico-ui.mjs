@@ -242,6 +242,33 @@ function deleteItem(id) {
   byId.delete(id);
 }
 
+// Equality signature for "same login" — username + password. Computed locally;
+// only used to compare, never returned/shown/logged.
+const loginSig = (it) => (it.login?.username || "") + " " + (it.login?.password || "");
+
+// Merge entries that are the same login: keep one, union their URIs, carry over
+// any field the primary lacks, and Trash the rest (recoverable).
+function mergeItems(ids) {
+  const items = ids.map((id) => byId.get(id)).filter(Boolean);
+  if (items.length < 2) throw new Error("need at least two entries to merge");
+  if (!items.every((it) => loginSig(it) === loginSig(items[0]))) throw new Error("entries are not identical");
+  const primary = items.find((it) => (it.login?.uris || []).some((u) => { const h = hostOf(u.uri); return h && (h === ROOT || h.endsWith(`.${ROOT}`)); })) || items[0];
+  const others = items.filter((it) => it.id !== primary.id);
+  primary.login = primary.login || {};
+  const seen = new Set(); const uris = [];
+  for (const it of [primary, ...others]) for (const u of (it.login?.uris || [])) { const k = (u.uri || "").toLowerCase(); if (!seen.has(k)) { seen.add(k); uris.push(u); } }
+  primary.login.uris = uris;
+  for (const it of others) {
+    if (!primary.login.totp && it.login?.totp) primary.login.totp = it.login.totp;
+    if (!(primary.login.fido2Credentials || []).length && (it.login?.fido2Credentials || []).length) primary.login.fido2Credentials = it.login.fido2Credentials;
+    if (!primary.notes && it.notes) primary.notes = it.notes;
+    if ((it.fields || []).length) primary.fields = [...(primary.fields || []), ...it.fields];
+  }
+  bw(["edit", "item", primary.id, Buffer.from(JSON.stringify(primary)).toString("base64")]);
+  for (const it of others) deleteItem(it.id);
+  return { kept: primary.id, removed: others.map((o) => o.id) };
+}
+
 function revertAll() {
   let n = 0;
   for (const it of byId.values()) {
@@ -317,6 +344,20 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/apply-one") {
       const { id, cand } = await readJson(req);
       try { applyFavico(id, cand); return send(res, 200, { ok: true }); } catch (e) { return send(res, 400, { ok: false, error: e.message }); }
+    }
+    if (req.method === "GET" && url.pathname === "/api/dup-status") {
+      // Per-group: are all entries the same login (username+password)? Compared
+      // locally; ONLY the booleans are returned — passwords never leave this process.
+      const groups = (SECTIONS.dups || []).map((g) => {
+        const items = g.map((e) => byId.get(e.id)).filter(Boolean);
+        const identical = items.length > 1 && items.length === g.length && items.every((it) => loginSig(it) === loginSig(items[0]));
+        return { identical };
+      });
+      return send(res, 200, { groups });
+    }
+    if (req.method === "POST" && url.pathname === "/api/merge") {
+      const { ids = [] } = await readJson(req);
+      try { return send(res, 200, { ok: true, ...mergeItems(ids) }); } catch (e) { return send(res, 400, { ok: false, error: e.message }); }
     }
     if (req.method === "POST" && url.pathname === "/api/commit") {
       const { icons = [], renames = [], deletes = [] } = await readJson(req);
@@ -442,6 +483,15 @@ small{opacity:.6}
 .bgrow label{display:inline-flex;align-items:center;gap:5px;cursor:pointer}
 .bgrow input[type=color]{width:44px;height:26px;padding:0;border:1px solid #8886;border-radius:6px;background:none;cursor:pointer}
 .checker{background-image:linear-gradient(45deg,#8884 25%,transparent 25%),linear-gradient(-45deg,#8884 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#8884 75%),linear-gradient(-45deg,transparent 75%,#8884 75%);background-size:14px 14px;background-position:0 0,0 7px,7px -7px,-7px 0}
+.optrow{display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border:1px solid #8884;border-radius:9px;margin:8px 0}
+.optdesc{font-size:12px;opacity:.72;margin-top:3px}
+.switch{position:relative;display:inline-block;width:44px;height:24px;flex:0 0 auto;cursor:pointer;margin-top:2px}
+.switch input{opacity:0;width:0;height:0}
+.switch .track{position:absolute;inset:0;background:#8886;border-radius:999px;transition:background .15s}
+.switch .track:before{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;background:#fff;border-radius:50%;transition:transform .15s}
+.switch input:checked+.track{background:#2563eb}
+.switch input:checked+.track:before{transform:translateX(20px)}
+.warnrow{margin-top:6px;font-size:13px;color:#b45309;font-weight:500}
 </style></head><body>
 <h1><span class="brandword">favico</span> × Bitwarden</h1>
 <p class="sub">A guided review of your logins. Adds <code>name.favico.app</code> as URI&nbsp;1 (match&nbsp;=&nbsp;Never) so Bitwarden shows the icon; your real URL moves down and still autofills. <b>Nothing is written to your vault until the final Apply step.</b></p>
@@ -460,6 +510,7 @@ small{opacity:.6}
 const $=(h)=>{const t=document.createElement('template');t.innerHTML=h.trim();return t.content.firstChild};
 let data;
 let plan={icons:{},renames:{},deletes:{}}, cur=0, visited={}, committed=false;
+let consent={compare:false,icons:false,report:false}, gone={};
 let iconIndex={}, renameIndex={}, dupIndex={};
 async function load(){ data=await (await fetch('/api/data')).json();
   ['s1','s2','s3'].forEach(s=>(data[s]||[]).forEach(e=>{e._sec=s;iconIndex[e.id]=e;}));
@@ -473,6 +524,7 @@ function esc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>'
 // Order: declutter (remove duplicates) → identify (rename) → beautify (icons) → review.
 // Entries you mark for removal in step 1 are hidden from the later steps.
 const STEPS=[
+  {key:'consent',title:'Options',render:renderConsent},
   {key:'dups',title:'Duplicates',render:renderDups},
   {key:'renames',title:'Rename',render:renderRenames},
   {key:'s1',title:'Matched',render:()=>renderIcons('s1',{pre:true,hint:'A matching icon was found for each entry that has none. Untick any you do not want; fix a wrong match with the search or upload.'})},
@@ -504,7 +556,7 @@ function stepper(){
 function renderIcons(key,opts){
   opts=opts||{};
   const wrap=$(\`<div data-step="\${key}"></div>\`);
-  const list=(data[key]||[]).filter(e=>!plan.deletes[e.id]);
+  const list=(data[key]||[]).filter(e=>!plan.deletes[e.id]&&!gone[e.id]);
   if(opts.hint) wrap.appendChild($(\`<p class="hint">\${opts.hint}</p>\`));
   if(!list.length){ wrap.appendChild($('<p class="hint">Nothing in this section. 🎉</p>')); return wrap; }
   if(key!=='s3') wrap.appendChild($('<label class="selall"><input type="checkbox" class="allchk"'+(key==='s1'?' checked':'')+'> Select all</label>'));
@@ -534,7 +586,7 @@ async function pickIcon(e, cell){
 
 function renderRenames(){
   const wrap=$('<div data-step="renames"></div>');
-  const rn=(data.renames||[]).filter(e=>!plan.deletes[e.id]);
+  const rn=(data.renames||[]).filter(e=>!plan.deletes[e.id]&&!gone[e.id]);
   wrap.appendChild($('<p class="hint">Cleaner names for entries that look like URLs or package IDs. Edit a suggestion before applying — only ticked rows are renamed. You can also change an entry\\'s icon here.</p>'));
   if(!rn.length){ wrap.appendChild($('<p class="hint">No rename suggestions.</p>')); return wrap; }
   wrap.appendChild($('<label class="selall"><input type="checkbox" class="allchk"> Select all</label>'));
@@ -556,18 +608,86 @@ function renderRenames(){
   return wrap;
 }
 
-function renderDups(){
-  const wrap=$('<div data-step="dups"></div>');
-  const dups=data.dups||[];
-  if(!dups.length){ wrap.appendChild($('<p class="hint">No duplicate logins detected. 🎉</p>')); return wrap; }
-  wrap.appendChild($('<p class="hint">Likely duplicates — grouped only when the <b>site address and username match</b>. Tick any to move to Bitwarden <b>Trash</b> (recoverable from Trash, via <code>bw restore</code>, or your encrypted backup). Keep at least one per group. <b style="color:#dc2626">Passwords are never read or compared</b>, so review before ticking.</p>'));
-  dups.forEach(g=>{
+function renderConsent(){
+  const wrap=$('<div data-step="consent"></div>');
+  wrap.appendChild($('<p class="hint">A few optional choices before you start — all off by default. Flip on only what you want.</p>'));
+  const opts=[
+    ['compare','Compare passwords to help with duplicates','Lets the tool check, <b>on this machine only</b>, whether two duplicates share a password — so it can offer a safe Merge. The value is <b style="color:#dc2626">never shown, stored, or sent</b>. If off, duplicates match on site + username only and stay hidden.'],
+    ['icons','Save icons you create or upload to help others','Adds icons you upload or crop to the <b>shared favico library</b> so others can find them. (Your icon is always stored so your own entry works; this just lists it publicly.)'],
+    ['report','Anonymously share renames to improve matching','Sends only generic <code>old → new</code> name hints (e.g. com.spotify.music → Spotify) so future users get smarter suggestions. No identifiers, no URLs, no vault data.'],
+  ];
+  for(const [k,title,desc] of opts){
+    const row=$(\`<div class="optrow"><label class="switch"><input type="checkbox" class="opt" data-k="\${k}"\${consent[k]?' checked':''}><span class="track"></span></label><div class="grow"><div class="name">\${title}</div><div class="optdesc">\${desc}</div></div></div>\`);
+    row.querySelector('.opt').onchange=(ev)=>{ consent[k]=ev.target.checked; };
+    wrap.appendChild(row);
+  }
+  return wrap;
+}
+
+function dupEntryRow(en){
+  const ic=en.host?\`<img src="https://icons.bitwarden.net/\${en.host}/icon.png" onerror="this.style.visibility='hidden'">\`:'<span class="noicon">?</span>';
+  return $(\`<div class="dup"><span class="iconcell">\${ic}</span><span class="grow"><span class="name">\${esc(en.name)}</span><span class="host">\${esc(en.username||'no username')}\${en.host?(' · '+esc(en.host)):''}</span></span></div>\`);
+}
+
+async function doMerge(g, box, st, btn){
+  const ids=g.map(e=>e.id).filter(id=>!gone[id]);
+  if(!confirm('Merge these '+ids.length+' entries into one? Their web addresses are combined; the extras move to Bitwarden Trash (recoverable).'))return;
+  btn.disabled=true; st.textContent=' merging…';
+  try{
+    const r=await (await fetch('/api/merge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})})).json();
+    if(r.ok){ (r.removed||[]).forEach(id=>gone[id]=true); box.innerHTML='<div class="done">✓ Merged — extra entries moved to Trash.</div>'; }
+    else { btn.disabled=false; st.innerHTML=' <span class="err">'+esc(r.error||'failed')+'</span>'; }
+  }catch{ btn.disabled=false; st.innerHTML=' <span class="err">merge failed</span>'; }
+}
+
+// "Show anyway" path (compare off): pick-to-remove, deferred to Trash on Apply.
+function renderDupPick(holder){
+  (data.dups||[]).forEach(g=>{
+    if(g.every(en=>gone[en.id])) return;
     const box=$('<div class="dupgroup"></div>');
     box.appendChild($(\`<div class="duphdr">\${esc(g[0].host||g[0].name)} · \${g.length} entries</div>\`));
     g.forEach(en=>{ const ck=plan.deletes[en.id]?'checked':''; const ic=en.host?\`<img src="https://icons.bitwarden.net/\${en.host}/icon.png" onerror="this.style.visibility='hidden'">\`:'<span class="noicon">?</span>'; box.appendChild($(\`<label class="dup" data-id="\${en.id}"><input type="checkbox" class="cd" \${ck}><span class="iconcell">\${ic}</span><span class="grow"><span class="name">\${esc(en.name)}</span><span class="host">\${esc(en.username||'no username')}\${en.host?(' · '+esc(en.host)):''}</span></span></label>\`)); });
-    wrap.appendChild(box);
+    holder.appendChild(box);
   });
-  wrap.addEventListener('change',refreshNav);
+  holder.addEventListener('change',refreshNav); refreshNav();
+}
+
+function renderDups(){
+  const wrap=$('<div data-step="dups"></div>');
+  const remaining=(data.dups||[]).filter(g=>!g.every(en=>gone[en.id]));
+  if(!remaining.length){ wrap.appendChild($('<p class="hint">No duplicate logins\\u00a0— or all handled. 🎉</p>')); return wrap; }
+
+  if(!consent.compare){
+    wrap.appendChild($('<p class="hint">You chose not to let the tool compare passwords, so these are matched on <b>site + username only</b> — entries below may actually be <b>different logins</b>. <b style="color:#dc2626">Passwords are never read or compared.</b> Hidden until you choose to show them.</p>'));
+    const holder=$('<div></div>');
+    const btn=$('<button class="primary">Show duplicates anyway</button>');
+    btn.onclick=()=>{ btn.remove(); renderDupPick(holder); };
+    wrap.appendChild(btn); wrap.appendChild(holder);
+    wrap.addEventListener('change',refreshNav);
+    return wrap;
+  }
+
+  wrap.appendChild($('<p class="hint">Identical logins (same username + password) can be <b>merged</b> into one. <b style="color:#dc2626">Passwords are compared on this machine only — never shown or sent.</b></p>'));
+  const holder=$('<div class="hint">Checking which duplicates are identical…</div>');
+  wrap.appendChild(holder);
+  (async()=>{
+    let status; try{ status=(await (await fetch('/api/dup-status')).json()).groups||[]; }catch{ status=[]; }
+    holder.className=''; holder.innerHTML='';
+    (data.dups||[]).forEach((g,i)=>{
+      if(g.every(en=>gone[en.id])) return;
+      const box=$('<div class="dupgroup"></div>');
+      box.appendChild($(\`<div class="duphdr">\${esc(g[0].host||g[0].name)} · \${g.length} entries</div>\`));
+      g.forEach(en=>box.appendChild(dupEntryRow(en)));
+      if(status[i] && status[i].identical){
+        const bar=$('<div class="row2"></div>'); const m=$('<button class="primary">Merge into one</button>'); const st=$('<span class="state"></span>');
+        m.onclick=()=>doMerge(g, box, st, m); bar.appendChild(m); bar.appendChild(st); box.appendChild(bar);
+      } else {
+        box.appendChild($('<div class="warnrow">⚠ Different details — review manually in Bitwarden.</div>'));
+      }
+      holder.appendChild(box);
+    });
+    if(!holder.children.length) holder.appendChild($('<p class="hint">All duplicate groups handled. 🎉</p>'));
+  })();
   return wrap;
 }
 
@@ -627,8 +747,10 @@ function refreshNav(){
   const back=document.querySelector('.navbar .back'), next=document.querySelector('.navbar .next');
   if(!next)return;
   back.style.visibility=cur===0?'hidden':'visible';
-  if(STEPS[cur].key==='confirm'){ next.style.display='none'; return; }
+  const key=STEPS[cur].key;
+  if(key==='confirm'){ next.style.display='none'; return; }
   next.style.display='';
+  if(key==='consent'||(key==='dups'&&consent.compare)){ next.textContent='Continue →'; return; }
   next.textContent=countTicks()>0?'Confirm selections →':'Skip this section →';
 }
 
