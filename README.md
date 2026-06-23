@@ -118,6 +118,12 @@ grep -nE "fetch\(" scripts/bw-favico-ui.mjs        # every outbound request
 grep -niE "password" scripts/bw-favico-ui.mjs       # never sent over the network
 ```
 
+## Feedback & bugs
+
+- **Ideas, questions, general feedback** → [GitHub Discussions](https://github.com/zacaracaz/favico-bitwarden/discussions)
+- **Bugs / something broke** → [GitHub Issues](https://github.com/zacaracaz/favico-bitwarden/issues)
+- **Security issues** → see [SECURITY.md](SECURITY.md) (please report privately)
+
 ## License & name
 
 Licensed under the **PolyForm Noncommercial License 1.0.0** (see [LICENSE.md](LICENSE.md)):

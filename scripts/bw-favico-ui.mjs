@@ -852,7 +852,7 @@ function openPicker(opts){
 
       <div class="pane" data-pane="upload" hidden>
         <button class="up-file">Choose an image file…</button>
-        <p class="phint">A square-ish image works best.</p>
+        <p class="phint">A square-ish image works best. Tip: press <b>Ctrl+V</b> (<b>⌘V</b> on Mac) to paste an image straight from your clipboard.</p>
       </div>
 
       <div class="crop-wrap" hidden>
@@ -926,9 +926,12 @@ function openPicker(opts){
     const fileInput=$('<input type="file" accept="image/*" style="display:none">'); bg.appendChild(fileInput);
     upFile.onclick=()=>fileInput.click();
     fileInput.onchange=()=>{ const f=fileInput.files[0]; fileInput.value=''; if(!f)return; if(!nameTouched) nameI.value=f.name.replace(/\\.[^.]*$/,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,63); loadFile(f); };
+    // Ctrl/⌘+V: grab an image off the clipboard (from any tab), jump to Upload, load it.
+    function onPaste(ev){ const items=(ev.clipboardData&&ev.clipboardData.items)||[]; for(const it of items){ if(it.type&&it.type.indexOf('image')===0){ const f=it.getAsFile(); if(f){ ev.preventDefault(); setMode('upload'); err.textContent=''; loadFile(f); return; } } } }
+    document.addEventListener('paste',onPaste);
 
     // finish
-    function close(r){ if(objUrl)URL.revokeObjectURL(objUrl); bg.remove(); resolve(r); }
+    function close(r){ if(objUrl)URL.revokeObjectURL(objUrl); document.removeEventListener('paste',onPaste); bg.remove(); resolve(r); }
     bg.querySelector('.ccancel').onclick=()=>close(null);
     let downOnBg=false;
     bg.addEventListener('mousedown',(ev)=>{ downOnBg=(ev.target===bg); });
