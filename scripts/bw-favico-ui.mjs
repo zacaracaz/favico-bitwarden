@@ -173,9 +173,22 @@ async function classify(onProgress) {
    }
   });
   const byName = (a, b) => a.name.localeCompare(b.name);
+  // Download community rename hints (public, aggregated). Nothing is sent — we
+  // just fetch the list and apply it locally to improve suggestions.
+  const learned = new Map();
+  try {
+    const r = await fetch(`${FAVICO}/api/learn`, { signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+    if (r.ok) for (const mpg of ((await r.json()).mappings || [])) if (!learned.has(mpg.from)) learned.set(mpg.from, mpg.to);
+  } catch { /* hints are optional */ }
+  const learnKey = (s) => (s || "").normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase();
+  const suggestName = (name) => {
+    const hint = learned.get(learnKey(name));               // crowd hint wins when present
+    if (hint && hint.toLowerCase() !== learnKey(name)) return hint;
+    return suggestClean(name);                               // else the local heuristic
+  };
   const renames = logins
-    .map((it) => ({ id: it.id, current: it.name || "(no name)", suggested: suggestClean(it.name), host: it.login.uris.map((u) => hostOf(u.uri)).find(Boolean) || null }))
-    .filter((r) => r.suggested)
+    .map((it) => ({ id: it.id, current: it.name || "(no name)", suggested: suggestName(it.name), host: it.login.uris.map((u) => hostOf(u.uri)).find(Boolean) || null }))
+    .filter((r) => r.suggested && r.suggested !== r.current)
     .sort((a, b) => a.current.localeCompare(b.current));
 
   // Likely-duplicate logins. Grouped strictly: the SAME site host plus the same
@@ -283,7 +296,7 @@ function revertAll() {
   return n;
 }
 
-async function uploadCustom(name, dataUrl) {
+async function uploadCustom(name, dataUrl, listed = true) {
   const m = /^data:([^;]+);base64,(.+)$/s.exec(dataUrl || "");
   if (!m) throw new Error("bad image data");
   const buf = Buffer.from(m[2], "base64");
@@ -293,6 +306,7 @@ async function uploadCustom(name, dataUrl) {
   for (let attempt = 0; attempt < 2; attempt++) {
     const fd = new FormData();
     fd.set("subdomain", sub);
+    fd.set("listed", listed ? "true" : "false"); // false = stored but not in public search
     fd.set("file", new Blob([buf], { type: m[1] }), "icon");
     const r = await fetch(`${FAVICO}/api/icons`, { method: "POST", body: fd });
     const d = await r.json();
@@ -360,23 +374,27 @@ const server = http.createServer(async (req, res) => {
       try { return send(res, 200, { ok: true, ...mergeItems(ids) }); } catch (e) { return send(res, 400, { ok: false, error: e.message }); }
     }
     if (req.method === "POST" && url.pathname === "/api/commit") {
-      const { icons = [], renames = [], deletes = [] } = await readJson(req);
+      const { icons = [], renames = [], deletes = [], report = false } = await readJson(req);
       const results = { icons: [], renames: [], deletes: [] };
       // Merge per-item changes so each item is edited only once.
       const changes = new Map();
       for (const { id, cand } of icons) { const c = changes.get(id) || {}; c.cand = cand; changes.set(id, c); }
       for (const { id, name } of renames) { const c = changes.get(id) || {}; c.name = name; changes.set(id, c); }
+      const hints = []; // {from,to} for opted-in rename reporting
       for (const [id, c] of changes) {
+        const before = byId.get(id)?.name;
         try {
           applyChanges(id, c);
           if (c.cand !== undefined) results.icons.push({ id, ok: true });
-          if (c.name !== undefined) results.renames.push({ id, ok: true });
+          if (c.name !== undefined) { results.renames.push({ id, ok: true }); if (before && before !== c.name) hints.push({ from: before, to: c.name }); }
         } catch (e) {
           if (c.cand !== undefined) results.icons.push({ id, ok: false, error: e.message });
           if (c.name !== undefined) results.renames.push({ id, ok: false, error: e.message });
         }
       }
       for (const id of deletes) { try { deleteItem(id); results.deletes.push({ id, ok: true }); } catch (e) { results.deletes.push({ id, ok: false, error: e.message }); } }
+      // Opt-in: share generic "old name -> new name" hints (no IDs, URLs, or secrets).
+      if (report && hints.length) { try { await fetch(`${FAVICO}/api/learn`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: hints }) }); } catch { /* best-effort */ } }
       return send(res, 200, { results });
     }
     if (req.method === "POST" && url.pathname === "/api/revert") {
@@ -385,13 +403,13 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { reverted: n });
     }
     if (req.method === "POST" && url.pathname === "/api/upload") {
-      const { name, dataUrl } = await readJson(req);
-      try { const sub = await uploadCustom(name, dataUrl); return send(res, 200, { ok: true, cand: sub }); }
+      const { name, dataUrl, listed = true } = await readJson(req);
+      try { const sub = await uploadCustom(name, dataUrl, listed); return send(res, 200, { ok: true, cand: sub }); }
       catch (e) { return send(res, 400, { ok: false, error: e.message }); }
     }
     if (req.method === "POST" && url.pathname === "/api/upload-apply") {
-      const { id, name, dataUrl } = await readJson(req);
-      try { const sub = await uploadCustom(name, dataUrl); applyFavico(id, sub); return send(res, 200, { ok: true, cand: sub }); } catch (e) { return send(res, 400, { ok: false, error: e.message }); }
+      const { id, name, dataUrl, listed = true } = await readJson(req);
+      try { const sub = await uploadCustom(name, dataUrl, listed); applyFavico(id, sub); return send(res, 200, { ok: true, cand: sub }); } catch (e) { return send(res, 400, { ok: false, error: e.message }); }
     }
     send(res, 404, { error: "not found" });
   } catch (e) {
@@ -500,7 +518,8 @@ small{opacity:.6}
 <li>Your vault is decrypted <b>only on this machine</b>, using the Bitwarden session you unlocked. <b>Passwords and other secrets are never sent anywhere and never logged.</b></li>
 <li>Sent to <b>Bitwarden's own icon service</b> (icons.bitwarden.net): each entry's <b>domain</b>, to check whether it already has a favicon. (Bitwarden already stores your vault.)</li>
 <li>Sent to <b>favico.app</b>: brand-name guesses derived from your domains (to find matching icons), anything you type in a <b>search</b> box, and any <b>image you choose/upload</b> (to store as an icon).</li>
-<li><b>Icons you upload or pick from a web search are saved on the favico.app server</b> and added to the shared icon library, so they keep working and become <b>searchable by everyone</b> (that's by design, for convenience). They hold only the image and the short name you give it — <b>no vault data</b>.</li>
+<li><b>Icons you upload or pick from a web search are saved on the favico.app server</b> (they must be, so your entry can show them). Whether they're also <b>listed in public search</b> is the "save icons to help others" toggle on the Options step. They hold only the image and the short name — <b>no vault data</b>.</li>
+<li><b>Rename hints:</b> the tool <b>downloads</b> a public list of community "old name → new name" suggestions to improve renaming (nothing is sent to fetch it). It only <b>sends</b> your own <code>old → new</code> pairs if you turn on the "share renames" toggle — never identifiers, URLs, or secrets.</li>
 <li><b>Duplicate detection</b> runs entirely on this machine and only looks at each login's <b>site and username</b> — never the password. Anything you choose to remove is <b>soft-deleted to Bitwarden's Trash</b> (recoverable), not erased.</li>
 <li>Stays local: all <b>edits, renames, deletions, and the encrypted backup</b> go only between this machine and Bitwarden via the CLI — favico.app never sees them.</li>
 <li>It's <b>open source</b> — you can read exactly what it does.</li>
@@ -579,7 +598,7 @@ async function pickIcon(e, cell){
   const setC=(cand)=>{ plan.icons[e.id]=cand; cell.innerHTML=\`<img src="https://\${cand}.favico.app/favicon.ico" onerror="this.style.visibility='hidden'">\`; };
   if(picked.cand){ setC(picked.cand); return; }
   if(picked.upload){ const old=cell.innerHTML; cell.innerHTML='<span class="noicon">…</span>';
-    try{ const res=await (await fetch('/api/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:picked.upload.name,dataUrl:picked.upload.dataUrl})})).json();
+    try{ const res=await (await fetch('/api/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:picked.upload.name,dataUrl:picked.upload.dataUrl,listed:consent.icons})})).json();
       if(res.ok) setC(res.cand); else cell.innerHTML=old;
     }catch{ cell.innerHTML=old; } }
 }
@@ -777,7 +796,7 @@ async function commit(apply,dl){
   const res=document.getElementById('commitresult');
   res.innerHTML='<div class="proc">⏳ Processing '+total+' change'+(total===1?'':'s')+'… don’t close this window.</div>';
   try{
-    const r=await (await fetch('/api/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({icons,renames,deletes})})).json();
+    const r=await (await fetch('/api/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({icons,renames,deletes,report:consent.report})})).json();
     const sum=a=>({ok:a.filter(x=>x.ok).length,n:a.length});
     const si=sum(r.results.icons),sr=sum(r.results.renames),sd=sum(r.results.deletes);
     const fails=[...r.results.icons,...r.results.renames,...r.results.deletes].filter(x=>!x.ok);
@@ -927,7 +946,7 @@ function iconRow(e, opts){
     if(!picked)return;
     if(picked.cand){ setChosen(picked.cand); return; }
     if(picked.upload){ state.textContent='Uploading…';
-      try{ const res=await (await fetch('/api/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:picked.upload.name,dataUrl:picked.upload.dataUrl})})).json();
+      try{ const res=await (await fetch('/api/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:picked.upload.name,dataUrl:picked.upload.dataUrl,listed:consent.icons})})).json();
         if(res.ok){ setChosen(res.cand); state.textContent=''; } else state.innerHTML='<span class="err">'+esc(res.error||'upload failed')+'</span>';
       }catch{ state.innerHTML='<span class="err">upload failed</span>'; } }
   };
