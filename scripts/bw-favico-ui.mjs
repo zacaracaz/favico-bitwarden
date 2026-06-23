@@ -518,7 +518,7 @@ small{opacity:.6}
 <li>Your vault is decrypted <b>only on this machine</b>, using the Bitwarden session you unlocked. <b>Passwords and other secrets are never sent anywhere and never logged.</b></li>
 <li>Sent to <b>Bitwarden's own icon service</b> (icons.bitwarden.net): each entry's <b>domain</b>, to check whether it already has a favicon. (Bitwarden already stores your vault.)</li>
 <li>Sent to <b>favico.app</b>: brand-name guesses derived from your domains (to find matching icons), anything you type in a <b>search</b> box, and any <b>image you choose/upload</b> (to store as an icon).</li>
-<li><b>Icons you upload or pick from a web search are saved on the favico.app server</b> (they must be, so your entry can show them). Whether they're also <b>listed in public search</b> is the "save icons to help others" toggle on the Options step. They hold only the image and the short name — <b>no vault data</b>.</li>
+<li><b>Icons you upload or pick from a web search are saved on the favico.app server</b> (they must be, so Bitwarden can fetch them) and added to the <b>shared, searchable library</b> so others with the same site benefit. They hold only the image and the short name you give it — <b>no vault data</b>.</li>
 <li><b>Rename hints:</b> the tool <b>downloads</b> a public list of community "old name → new name" suggestions to improve renaming (nothing is sent to fetch it). It only <b>sends</b> your own <code>old → new</code> pairs if you turn on the "share renames" toggle — never identifiers, URLs, or secrets.</li>
 <li><b>Duplicate detection</b> runs entirely on this machine and only looks at each login's <b>site and username</b> — never the password. Anything you choose to remove is <b>soft-deleted to Bitwarden's Trash</b> (recoverable), not erased.</li>
 <li>Stays local: all <b>edits, renames, deletions, and the encrypted backup</b> go only between this machine and Bitwarden via the CLI — favico.app never sees them.</li>
@@ -529,7 +529,7 @@ small{opacity:.6}
 const $=(h)=>{const t=document.createElement('template');t.innerHTML=h.trim();return t.content.firstChild};
 let data;
 let plan={icons:{},renames:{},deletes:{}}, cur=0, visited={}, committed=false;
-let consent={compare:false,icons:false,report:false}, gone={};
+let consent={compare:false,report:false}, gone={};
 let iconIndex={}, renameIndex={}, dupIndex={};
 async function load(){ data=await (await fetch('/api/data')).json();
   ['s1','s2','s3'].forEach(s=>(data[s]||[]).forEach(e=>{e._sec=s;iconIndex[e.id]=e;}));
@@ -598,7 +598,7 @@ async function pickIcon(e, cell){
   const setC=(cand)=>{ plan.icons[e.id]=cand; cell.innerHTML=\`<img src="https://\${cand}.favico.app/favicon.ico" onerror="this.style.visibility='hidden'">\`; };
   if(picked.cand){ setC(picked.cand); return; }
   if(picked.upload){ const old=cell.innerHTML; cell.innerHTML='<span class="noicon">…</span>';
-    try{ const res=await (await fetch('/api/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:picked.upload.name,dataUrl:picked.upload.dataUrl,listed:consent.icons})})).json();
+    try{ const res=await (await fetch('/api/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:picked.upload.name,dataUrl:picked.upload.dataUrl})})).json();
       if(res.ok) setC(res.cand); else cell.innerHTML=old;
     }catch{ cell.innerHTML=old; } }
 }
@@ -632,7 +632,6 @@ function renderConsent(){
   wrap.appendChild($('<p class="hint">A few optional choices before you start — all off by default. Flip on only what you want.</p>'));
   const opts=[
     ['compare','Compare passwords to help with duplicates','Lets the tool check, <b>on this machine only</b>, whether two duplicates share a password — so it can offer a safe Merge. The value is <b style="color:#dc2626">never shown, stored, or sent</b>. If off, duplicates match on site + username only and stay hidden.'],
-    ['icons','Save icons you create or upload to help others','Adds icons you upload or crop to the <b>shared favico library</b> so others can find them. (Your icon is always stored so your own entry works; this just lists it publicly.)'],
     ['report','Anonymously share renames to improve matching','Sends only generic <code>old → new</code> name hints (e.g. com.spotify.music → Spotify) so future users get smarter suggestions. No identifiers, no URLs, no vault data.'],
   ];
   for(const [k,title,desc] of opts){
@@ -946,7 +945,7 @@ function iconRow(e, opts){
     if(!picked)return;
     if(picked.cand){ setChosen(picked.cand); return; }
     if(picked.upload){ state.textContent='Uploading…';
-      try{ const res=await (await fetch('/api/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:picked.upload.name,dataUrl:picked.upload.dataUrl,listed:consent.icons})})).json();
+      try{ const res=await (await fetch('/api/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:picked.upload.name,dataUrl:picked.upload.dataUrl})})).json();
         if(res.ok){ setChosen(res.cand); state.textContent=''; } else state.innerHTML='<span class="err">'+esc(res.error||'upload failed')+'</span>';
       }catch{ state.innerHTML='<span class="err">upload failed</span>'; } }
   };
