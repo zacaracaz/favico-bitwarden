@@ -46,6 +46,19 @@ You should only ever see `icons.bitwarden.net`, `www.favico.app`, and `localhost
 - Removals are **soft-deleted to Bitwarden's Trash** (recoverable), never permanent.
 - The wizard has a **"Revert all favico URIs"** button that undoes everything it added.
 
+## Known limitations (full disclosure)
+- While running, the tool serves its UI on `127.0.0.1`. It rejects non-loopback
+  `Host` headers and requires a per-run token on every API call, so other websites
+  (and DNS-rebinding) can't drive it — but anything already running **as you** on
+  your machine could read that token. The local server only ever exposes entry
+  *names/usernames* (never passwords).
+- It drives the official `bw` CLI with `--session`, so on Windows the session key is
+  briefly visible in the process command line to other local processes. This is
+  inherent to the Bitwarden CLI, not specific to this tool.
+- Uploaded icons are public images. They're served with a sandboxing
+  `Content-Security-Policy`, but image *content* isn't pre-moderated — bad icons are
+  removed reactively.
+
 ## Reporting a vulnerability
 Please email **support@favico.app** with details. This was built with AI assistance by
 someone who isn't a security professional — careful review and responsible disclosure
