@@ -33,6 +33,7 @@ const FAVICO = "https://www.favico.app";
 const ROOT = "favico.app";
 const BW_ICONS = "https://icons.bitwarden.net";
 const MATCH_NEVER = 5;
+const VERSION = "2.0.0";
 // Per-run token: the served page carries it and every /api call must echo it.
 // Stops a random website (or DNS rebinding) from driving the local server.
 const UI_TOKEN = crypto.randomBytes(18).toString("hex");
@@ -515,6 +516,7 @@ const HTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewp
 .brandword{background:linear-gradient(143deg,#ff8a1e 0%,#ff3d5f 24%,#f02d86 46%,#b23be0 64%,#7a3df2 82%,#2e5bff 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
 body{font-family:system-ui,sans-serif;max-width:880px;margin:0 auto;padding:24px;line-height:1.4}
 h1{margin:0 0 4px}.sub{opacity:.6;font-size:14px;margin:0 0 20px}
+.ver{font-size:12px;opacity:.45;font-weight:400;vertical-align:middle}
 h2{font-size:16px;margin:28px 0 6px}.hint{opacity:.6;font-size:13px;margin:0 0 10px}
 .row{display:flex;align-items:center;gap:10px;padding:7px 8px;border:1px solid #8884;border-radius:8px;margin:6px 0}
 .row img{width:28px;height:28px;border-radius:5px;flex:0 0 auto;background:#8881}
@@ -614,7 +616,7 @@ small{opacity:.6}
 .switch input:checked+.track:before{transform:translateX(20px)}
 .warnrow{margin-top:6px;font-size:13px;color:#b45309;font-weight:500}
 </style></head><body>
-<h1><span class="brandword">favico</span> × Bitwarden</h1>
+<h1><span class="brandword">favico</span> × Bitwarden <span class="ver">v${VERSION}</span></h1>
 <p class="sub">A guided review of your logins. Adds <code>name.favico.app</code> as URI&nbsp;1 (match&nbsp;=&nbsp;Never) so Bitwarden shows the icon; your real URL moves down and still autofills. <b>Nothing is written to your vault until the final Apply step.</b></p>
 <details class="notice"><summary>🔒 What leaves your machine</summary>
 <ul>
@@ -921,7 +923,7 @@ async function commit(apply,dl){
     const si=sum(r.icons),sr=sum(r.renames),sd=sum(r.deletes),sm=sum(r.merges);
     const nf=(si.n-si.ok)+(sr.n-sr.ok)+(sd.n-sd.ok)+(sm.n-sm.ok);
     ptitle.textContent=nf?'Done — with some errors':'All done ✓';
-    psum.innerHTML='<div class="tally"><span>Icons '+si.ok+'/'+si.n+'</span><span>Renames '+sr.ok+'/'+sr.n+'</span><span>Merges '+sm.ok+'/'+sm.n+'</span><span>Trash '+sd.ok+'/'+sd.n+'</span></div>'+(nf?'<p class="err">'+nf+' failed — open “Show details”.</p>':'')+'<p class="hint">Open Bitwarden and <b>Sync</b> to see the changes. Your change record was downloaded.</p>';
+    psum.innerHTML='<div class="tally"><span>Icons '+si.ok+'/'+si.n+'</span><span>Renames '+sr.ok+'/'+sr.n+'</span><span>Merges '+sm.ok+'/'+sm.n+'</span><span>Trash '+sd.ok+'/'+sd.n+'</span></div>'+(nf?'<p class="err">'+nf+' failed — open “Show details”.</p>':'')+'<p class="hint">Open Bitwarden and <b>Sync</b> to see the changes. Your change record was downloaded.</p><p class="hint">Let us know how it went — <a href="https://github.com/zacaracaz/favico-bitwarden/discussions" target="_blank" rel="noopener">share feedback on GitHub</a> or email <a href="mailto:support@favico.app">support@favico.app</a>.</p>';
     phint.remove();
     const close=$('<button class="primary pclose">All done — close this window</button>');
     close.onclick=()=>{ fetch('/api/quit',{method:'POST'}).catch(()=>{}); window.close(); setTimeout(()=>{ pact.innerHTML='<p class="hint">The tool has stopped — you can safely close this tab.</p>'; },350); };
@@ -1144,7 +1146,7 @@ async function main() {
     console.error("    Re-run:  $env:BW_SESSION = bw unlock --raw   (then start this again)\n");
     process.exit(1);
   }
-  console.error(`  ✓ Vault unlocked for ${st.userEmail} on ${serverLabel(st.serverUrl)}`);
+  console.error(`  ✓ favico v${VERSION} — vault unlocked for ${st.userEmail} on ${serverLabel(st.serverUrl)}`);
 
   if (process.argv.includes("--no-backup")) {
     console.error("Skipping backup (--no-backup).");
