@@ -148,6 +148,18 @@ async function classify(onProgress) {
   }
   if (!defaultHashes.size) { console.error("Could not reach icons.bitwarden.net"); process.exit(1); }
 
+  // Download community hints once (public, aggregated — nothing is sent). Used both
+  // to auto-match icons (host → icon) and to improve rename suggestions below.
+  const learnedRenames = new Map(), learnedIcons = new Map();
+  try {
+    const r = await fetch(`${FAVICO}/api/learn`, { signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+    if (r.ok) {
+      const d = await r.json();
+      for (const m of (d.renames || [])) if (!learnedRenames.has(m.from)) learnedRenames.set(m.from, m.to);
+      for (const m of (d.icons || [])) if (!learnedIcons.has(m.host)) learnedIcons.set(m.host, m.cand);
+    }
+  } catch { /* hints are optional */ }
+
   const s1 = [], s2 = [], s3 = [];
   let progressed = 0;
   if (onProgress) onProgress(0, logins.length);
@@ -163,7 +175,7 @@ async function classify(onProgress) {
       s3.push({ id: it.id, name: it.name || "(no name)", host, iconUrl: host ? `${BW_ICONS}/${host}/icon.png` : null });
       return;
     }
-    const cands = [...new Set([brandOf(host), slug(it.name)].filter(Boolean))];
+    const cands = [...new Set([(host ? learnedIcons.get(host) : null), brandOf(host), slug(it.name)].filter(Boolean))];
     let cand = null;
     for (const c of cands) { if (await favicoExists(c)) { cand = c; break; } }
     if (cand) s1.push({ id: it.id, name: it.name || "(no name)", host, cand, iconUrl: `https://${cand}.${ROOT}/favicon.ico` });
@@ -173,16 +185,9 @@ async function classify(onProgress) {
    }
   });
   const byName = (a, b) => a.name.localeCompare(b.name);
-  // Download community rename hints (public, aggregated). Nothing is sent — we
-  // just fetch the list and apply it locally to improve suggestions.
-  const learned = new Map();
-  try {
-    const r = await fetch(`${FAVICO}/api/learn`, { signal: AbortSignal.timeout(FETCH_TIMEOUT) });
-    if (r.ok) for (const mpg of ((await r.json()).mappings || [])) if (!learned.has(mpg.from)) learned.set(mpg.from, mpg.to);
-  } catch { /* hints are optional */ }
   const learnKey = (s) => (s || "").normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase();
   const suggestName = (name) => {
-    const hint = learned.get(learnKey(name));               // crowd hint wins when present
+    const hint = learnedRenames.get(learnKey(name));         // crowd hint wins when present
     if (hint && hint.toLowerCase() !== learnKey(name)) return hint;
     return suggestClean(name);                               // else the local heuristic
   };
@@ -374,18 +379,21 @@ const server = http.createServer(async (req, res) => {
       try { return send(res, 200, { ok: true, ...mergeItems(ids) }); } catch (e) { return send(res, 400, { ok: false, error: e.message }); }
     }
     if (req.method === "POST" && url.pathname === "/api/commit") {
-      const { icons = [], renames = [], deletes = [], report = false } = await readJson(req);
+      const { icons = [], renames = [], deletes = [], report = false, synonyms = [] } = await readJson(req);
       const results = { icons: [], renames: [], deletes: [] };
       // Merge per-item changes so each item is edited only once.
       const changes = new Map();
       for (const { id, cand } of icons) { const c = changes.get(id) || {}; c.cand = cand; changes.set(id, c); }
       for (const { id, name } of renames) { const c = changes.get(id) || {}; c.name = name; changes.set(id, c); }
-      const hints = []; // {from,to} for opted-in rename reporting
+      const hints = [], iconMatches = [], uses = []; // opted-in sharing
       for (const [id, c] of changes) {
-        const before = byId.get(id)?.name;
+        const it = byId.get(id);
+        const before = it?.name;
+        let host = null;
+        for (const u of (it?.login?.uris || [])) { const hh = hostOf(u.uri); if (hh && !(hh === ROOT || hh.endsWith(`.${ROOT}`))) { host = hh; break; } }
         try {
           applyChanges(id, c);
-          if (c.cand !== undefined) results.icons.push({ id, ok: true });
+          if (c.cand !== undefined) { results.icons.push({ id, ok: true }); uses.push(c.cand); if (host) iconMatches.push({ host, cand: c.cand }); }
           if (c.name !== undefined) { results.renames.push({ id, ok: true }); if (before && before !== c.name) hints.push({ from: before, to: c.name }); }
         } catch (e) {
           if (c.cand !== undefined) results.icons.push({ id, ok: false, error: e.message });
@@ -393,8 +401,11 @@ const server = http.createServer(async (req, res) => {
         }
       }
       for (const id of deletes) { try { deleteItem(id); results.deletes.push({ id, ok: true }); } catch (e) { results.deletes.push({ id, ok: false, error: e.message }); } }
-      // Opt-in: share generic "old name -> new name" hints (no IDs, URLs, or secrets).
-      if (report && hints.length) { try { await fetch(`${FAVICO}/api/learn`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: hints }) }); } catch { /* best-effort */ } }
+      // Opt-in: share generic, anonymous hints (renames, icon matches, search picks,
+      // icon usage). No IDs, URLs, passwords, or full entries.
+      if (report && (hints.length || iconMatches.length || uses.length || (synonyms || []).length)) {
+        try { await fetch(`${FAVICO}/api/learn`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ renames: hints, iconMatches, uses, synonyms }) }); } catch { /* best-effort */ }
+      }
       return send(res, 200, { results });
     }
     if (req.method === "POST" && url.pathname === "/api/revert") {
@@ -529,7 +540,7 @@ small{opacity:.6}
 const $=(h)=>{const t=document.createElement('template');t.innerHTML=h.trim();return t.content.firstChild};
 let data;
 let plan={icons:{},renames:{},deletes:{}}, cur=0, visited={}, committed=false;
-let consent={compare:false,report:false}, gone={};
+let consent={compare:false,report:false}, gone={}, pendingSynonyms=[];
 let iconIndex={}, renameIndex={}, dupIndex={};
 async function load(){ data=await (await fetch('/api/data')).json();
   ['s1','s2','s3'].forEach(s=>(data[s]||[]).forEach(e=>{e._sec=s;iconIndex[e.id]=e;}));
@@ -632,7 +643,7 @@ function renderConsent(){
   wrap.appendChild($('<p class="hint">A few optional choices before you start — all off by default. Flip on only what you want.</p>'));
   const opts=[
     ['compare','Compare passwords to help with duplicates','Lets the tool check, <b>on this machine only</b>, whether two duplicates share a password — so it can offer a safe Merge. The value is <b style="color:#dc2626">never shown, stored, or sent</b>. If off, duplicates match on site + username only and stay hidden.'],
-    ['report','Anonymously share renames to improve matching','Sends only generic <code>old → new</code> name hints (e.g. com.spotify.music → Spotify) so future users get smarter suggestions. No identifiers, no URLs, no vault data.'],
+    ['report','Anonymously help improve matching for everyone','Sends generic, anonymous hints — renames (<code>old → new</code>), which icon you pick for a site, your library-search picks, and which icons you use — so future users get smarter matching, search, and suggestions. No identifiers, no URLs, no passwords, no full entries.'],
   ];
   for(const [k,title,desc] of opts){
     const row=$(\`<div class="optrow"><label class="switch"><input type="checkbox" class="opt" data-k="\${k}"\${consent[k]?' checked':''}><span class="track"></span></label><div class="grow"><div class="name">\${title}</div><div class="optdesc">\${desc}</div></div></div>\`);
@@ -795,7 +806,7 @@ async function commit(apply,dl){
   const res=document.getElementById('commitresult');
   res.innerHTML='<div class="proc">⏳ Processing '+total+' change'+(total===1?'':'s')+'… don’t close this window.</div>';
   try{
-    const r=await (await fetch('/api/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({icons,renames,deletes,report:consent.report})})).json();
+    const r=await (await fetch('/api/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({icons,renames,deletes,report:consent.report,synonyms:pendingSynonyms})})).json();
     const sum=a=>({ok:a.filter(x=>x.ok).length,n:a.length});
     const si=sum(r.results.icons),sr=sum(r.results.renames),sd=sum(r.results.deletes);
     const fails=[...r.results.icons,...r.results.renames,...r.results.deletes].filter(x=>!x.ok);
@@ -912,7 +923,7 @@ function openPicker(opts){
     bg.addEventListener('mousedown',(ev)=>{ downOnBg=(ev.target===bg); });
     bg.onclick=(ev)=>{ if(ev.target===bg && downOnBg) close(null); };
     bg.querySelector('.cgo').onclick=()=>{
-      if(mode==='library'){ if(!libPick){err.textContent='Click an icon in the results to select it first.';return;} close({cand:libPick}); return; }
+      if(mode==='library'){ if(!libPick){err.textContent='Click an icon in the results to select it first.';return;} const qy=(libQ.value||'').trim().toLowerCase().replace(/[^a-z0-9-]/g,''); if(qy && qy!==libPick) pendingSynonyms.push({query:qy,cand:libPick}); close({cand:libPick}); return; }
       const name=nameI.value.trim();
       if(!iw){ err.textContent=(mode==='web')?'Search, then click a result to select it.':'Choose an image file first.'; return; }
       if(!name){ err.textContent='Enter a library name to save it as.'; return; }
