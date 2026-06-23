@@ -269,11 +269,11 @@ const loginSig = (it) => (it.login?.username || "") + " " + (it.login?.password 
 
 // Merge entries that are the same login: keep one, union their URIs, carry over
 // any field the primary lacks, and Trash the rest (recoverable).
-function mergeItems(ids) {
+function mergeItems(ids, keepId) {
   const items = ids.map((id) => byId.get(id)).filter(Boolean);
   if (items.length < 2) throw new Error("need at least two entries to merge");
   if (!items.every((it) => loginSig(it) === loginSig(items[0]))) throw new Error("entries are not identical");
-  const primary = items.find((it) => (it.login?.uris || []).some((u) => { const h = hostOf(u.uri); return h && (h === ROOT || h.endsWith(`.${ROOT}`)); })) || items[0];
+  const primary = (keepId && items.find((it) => it.id === keepId)) || items.find((it) => (it.login?.uris || []).some((u) => { const h = hostOf(u.uri); return h && (h === ROOT || h.endsWith(`.${ROOT}`)); })) || items[0];
   const others = items.filter((it) => it.id !== primary.id);
   primary.login = primary.login || {};
   const seen = new Set(); const uris = [];
@@ -285,7 +285,10 @@ function mergeItems(ids) {
     if (!primary.notes && it.notes) primary.notes = it.notes;
     if ((it.fields || []).length) primary.fields = [...(primary.fields || []), ...it.fields];
   }
-  bw(["edit", "item", primary.id, Buffer.from(JSON.stringify(primary)).toString("base64")]);
+  const out = bw(["edit", "item", primary.id, Buffer.from(JSON.stringify(primary)).toString("base64")]);
+  // Refresh the kept item (new revisionDate) so a later icon/rename edit on it
+  // doesn't fail with Bitwarden's "item is out of date".
+  try { const updated = JSON.parse(out); if (updated && updated.id) byId.set(updated.id, updated); } catch { /* keep old */ }
   for (const it of others) deleteItem(it.id);
   return { kept: primary.id, removed: others.map((o) => o.id) };
 }
@@ -387,8 +390,14 @@ const server = http.createServer(async (req, res) => {
       try { return send(res, 200, { ok: true, ...mergeItems(ids) }); } catch (e) { return send(res, 400, { ok: false, error: e.message }); }
     }
     if (req.method === "POST" && url.pathname === "/api/commit") {
-      const { icons = [], renames = [], deletes = [], report = false, synonyms = [] } = await readJson(req);
-      const results = { icons: [], renames: [], deletes: [] };
+      const { icons = [], renames = [], deletes = [], merges = [], report = false, synonyms = [] } = await readJson(req);
+      const results = { icons: [], renames: [], deletes: [], merges: [] };
+      // Run planned merges first (combine duplicates) so the surviving entry is
+      // refreshed before any icon/rename edit targets it.
+      for (const m of merges) {
+        try { const r = mergeItems(m.ids || [], m.keep); results.merges.push({ ok: true, id: m.keep, ...r }); }
+        catch (e) { results.merges.push({ ok: false, id: m && m.keep, error: e.message }); }
+      }
       // Merge per-item changes so each item is edited only once.
       const changes = new Map();
       for (const { id, cand } of icons) { const c = changes.get(id) || {}; c.cand = cand; changes.set(id, c); }
@@ -521,7 +530,9 @@ small{opacity:.6}
 .bgrow input[type=color]{width:44px;height:26px;padding:0;border:1px solid #8886;border-radius:6px;background:none;cursor:pointer}
 .checker{background-image:linear-gradient(45deg,#8884 25%,transparent 25%),linear-gradient(-45deg,#8884 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#8884 75%),linear-gradient(-45deg,transparent 75%,#8884 75%);background-size:14px 14px;background-position:0 0,0 7px,7px -7px,-7px 0}
 .optrow{display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border:1px solid #8884;border-radius:9px;margin:8px 0}
-.optdesc{font-size:12px;opacity:.72;margin-top:3px}
+.optrow .grow>div{white-space:normal;overflow:visible;text-overflow:clip}
+.optdesc{font-size:12px;opacity:.72;margin-top:3px;line-height:1.45}
+.dupgroup.willmerge{border-color:#16a34a}
 .switch{position:relative;display:inline-block;width:44px;height:24px;flex:0 0 auto;cursor:pointer;margin-top:2px}
 .switch input{opacity:0;width:0;height:0}
 .switch .track{position:absolute;inset:0;background:#8886;border-radius:999px;transition:background .15s}
@@ -550,8 +561,10 @@ const _fetch=window.fetch.bind(window);
 window.fetch=(u,o)=>{ o=o||{}; if(typeof u==='string'&&u[0]==='/'){ o.headers={...(o.headers||{}),'x-favico-token':T}; } return _fetch(u,o); };
 const $=(h)=>{const t=document.createElement('template');t.innerHTML=h.trim();return t.content.firstChild};
 let data;
-let plan={icons:{},renames:{},deletes:{}}, cur=0, visited={}, committed=false;
+let plan={icons:{},renames:{},deletes:{},merges:{}}, cur=0, visited={}, committed=false;
 let consent={compare:false,report:false}, gone={}, pendingSynonyms=[];
+const gkey=(g)=>g.map(e=>e.id).slice().sort().join(',');
+const mergedDrop=(id)=>Object.values(plan.merges).some(m=>m.ids.includes(id)&&id!==m.keep);
 let iconIndex={}, renameIndex={}, dupIndex={};
 async function load(){ data=await (await fetch('/api/data')).json();
   ['s1','s2','s3'].forEach(s=>(data[s]||[]).forEach(e=>{e._sec=s;iconIndex[e.id]=e;}));
@@ -597,7 +610,7 @@ function stepper(){
 function renderIcons(key,opts){
   opts=opts||{};
   const wrap=$(\`<div data-step="\${key}"></div>\`);
-  const list=(data[key]||[]).filter(e=>!plan.deletes[e.id]&&!gone[e.id]);
+  const list=(data[key]||[]).filter(e=>!plan.deletes[e.id]&&!gone[e.id]&&!mergedDrop(e.id));
   if(opts.hint) wrap.appendChild($(\`<p class="hint">\${opts.hint}</p>\`));
   if(!list.length){ wrap.appendChild($('<p class="hint">Nothing in this section. 🎉</p>')); return wrap; }
   if(key!=='s3') wrap.appendChild($('<label class="selall"><input type="checkbox" class="allchk"'+(key==='s1'?' checked':'')+'> Select all</label>'));
@@ -627,7 +640,7 @@ async function pickIcon(e, cell){
 
 function renderRenames(){
   const wrap=$('<div data-step="renames"></div>');
-  const rn=(data.renames||[]).filter(e=>!plan.deletes[e.id]&&!gone[e.id]);
+  const rn=(data.renames||[]).filter(e=>!plan.deletes[e.id]&&!gone[e.id]&&!mergedDrop(e.id));
   wrap.appendChild($('<p class="hint">Cleaner names for entries that look like URLs or package IDs. Edit a suggestion before applying — only ticked rows are renamed. You can also change an entry\\'s icon here.</p>'));
   if(!rn.length){ wrap.appendChild($('<p class="hint">No rename suggestions.</p>')); return wrap; }
   wrap.appendChild($('<label class="selall"><input type="checkbox" class="allchk"> Select all</label>'));
@@ -669,16 +682,8 @@ function dupEntryRow(en){
   return $(\`<div class="dup"><span class="iconcell">\${ic}</span><span class="grow"><span class="name">\${esc(en.name)}</span><span class="host">\${esc(en.username||'no username')}\${en.host?(' · '+esc(en.host)):''}</span></span></div>\`);
 }
 
-async function doMerge(g, box, st, btn){
-  const ids=g.map(e=>e.id).filter(id=>!gone[id]);
-  if(!confirm('Merge these '+ids.length+' entries into one? Their web addresses are combined; the extras move to Bitwarden Trash (recoverable).'))return;
-  btn.disabled=true; st.textContent=' merging…';
-  try{
-    const r=await (await fetch('/api/merge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})})).json();
-    if(r.ok){ (r.removed||[]).forEach(id=>gone[id]=true); box.innerHTML='<div class="done">✓ Merged — extra entries moved to Trash.</div>'; }
-    else { btn.disabled=false; st.innerHTML=' <span class="err">'+esc(r.error||'failed')+'</span>'; }
-  }catch{ btn.disabled=false; st.innerHTML=' <span class="err">merge failed</span>'; }
-}
+// Merge is deferred to the Apply step: marking a group records it in plan.merges
+// and hides the extra copies from later steps; the merge runs server-side in /api/commit.
 
 // "Show anyway" path (compare off): pick-to-remove, deferred to Trash on Apply.
 function renderDupPick(holder){
@@ -719,8 +724,11 @@ function renderDups(){
       box.appendChild($(\`<div class="duphdr">\${esc(g[0].host||g[0].name)} · \${g.length} entries</div>\`));
       g.forEach(en=>box.appendChild(dupEntryRow(en)));
       if(status[i] && status[i].identical){
-        const bar=$('<div class="row2"></div>'); const m=$('<button class="primary">Merge into one</button>'); const st=$('<span class="state"></span>');
-        m.onclick=()=>doMerge(g, box, st, m); bar.appendChild(m); bar.appendChild(st); box.appendChild(bar);
+        const gk=gkey(g);
+        const bar=$('<div class="row2"></div>'); const m=$('<button></button>'); const st=$('<span class="state"></span>');
+        const sync=()=>{ const on=(gk in plan.merges); m.textContent=on?'Don\\'t merge':'Merge into one'; m.classList.toggle('primary',!on); box.classList.toggle('willmerge',on); st.innerHTML=on?' <span class="done">✓ Will be merged when you click Apply — extra copies go to Trash.</span>':''; };
+        m.onclick=()=>{ if(gk in plan.merges) delete plan.merges[gk]; else { plan.merges[gk]={keep:g[0].id,ids:g.map(e=>e.id)}; g.forEach(e=>{ if(e.id!==g[0].id){ delete plan.icons[e.id]; delete plan.renames[e.id]; delete plan.deletes[e.id]; } }); } sync(); };
+        sync(); bar.appendChild(m); bar.appendChild(st); box.appendChild(bar);
       } else {
         box.appendChild($('<div class="warnrow">⚠ Different details — review manually in Bitwarden.</div>'));
       }
@@ -733,16 +741,17 @@ function renderDups(){
 
 function renderConfirm(){
   const wrap=$('<div data-step="confirm"></div>');
-  const icons=Object.entries(plan.icons), renames=Object.entries(plan.renames), deletes=Object.keys(plan.deletes);
+  const icons=Object.entries(plan.icons), renames=Object.entries(plan.renames), deletes=Object.keys(plan.deletes), merges=Object.values(plan.merges);
   wrap.appendChild($('<p class="hint">Review everything below. <b>Nothing has changed in your vault yet</b> — changes apply only when you click Apply.</p>'));
-  wrap.appendChild($(\`<div class="summary"><span><b>\${icons.length}</b> icon\${icons.length===1?'':'s'}</span><span><b>\${renames.length}</b> rename\${renames.length===1?'':'s'}</span><span><b>\${deletes.length}</b> to Trash</span></div>\`));
+  wrap.appendChild($(\`<div class="summary"><span><b>\${icons.length}</b> icon\${icons.length===1?'':'s'}</span><span><b>\${renames.length}</b> rename\${renames.length===1?'':'s'}</span><span><b>\${merges.length}</b> merge\${merges.length===1?'':'s'}</span><span><b>\${deletes.length}</b> to Trash</span></div>\`));
   if(icons.length){ const sec=$('<div class="csec"><h3>Icons</h3></div>'); icons.forEach(([id,cand])=>{ const r=renameIndex[id]; const e=iconIndex[id]||dupIndex[id]||(r?{name:r.current,host:r.host}:null)||{}; const rep=e._sec==='s3'; sec.appendChild($(\`<div class="crow"><img class="ci" src="https://\${cand}.favico.app/favicon.ico" onerror="this.style.visibility='hidden'"><span class="grow"><span class="name">\${esc(e.name||id)}</span><span class="host">\${rep?'replace':'add'} → \${esc(cand)}.favico.app\${e.host?(' · '+esc(e.host)):''}</span></span></div>\`)); }); wrap.appendChild(sec); }
   if(renames.length){ const sec=$('<div class="csec"><h3>Renames</h3></div>'); renames.forEach(([id,name])=>{ const e=renameIndex[id]||{}; sec.appendChild($(\`<div class="crow"><span class="grow"><span class="name">\${esc(name)}</span><span class="host">was: \${esc(e.current||'')}</span></span></div>\`)); }); wrap.appendChild(sec); }
   if(deletes.length){ const sec=$('<div class="csec"><h3>Move to Trash</h3></div>'); sec.appendChild($('<p class="hint">Recoverable from Bitwarden Trash, <code>bw restore item &lt;id&gt;</code>, or your encrypted backup.</p>')); deletes.forEach(id=>{ const e=dupIndex[id]||{}; sec.appendChild($(\`<div class="crow"><span class="grow"><span class="name">\${esc(e.name||id)}</span><span class="host">\${esc(e.username||'no username')}\${e.host?(' · '+esc(e.host)):''}</span></span></div>\`)); }); wrap.appendChild(sec); }
-  if(!icons.length&&!renames.length&&!deletes.length) wrap.appendChild($('<p class="hint">No changes selected. Go back to pick some — or just close the tool, nothing will happen.</p>'));
+  if(merges.length){ const sec=$('<div class="csec"><h3>Merges</h3></div>'); sec.appendChild($('<p class="hint">Each group becomes one entry (web addresses combined); the extra copies move to Trash (recoverable).</p>')); merges.forEach(m=>{ const e=dupIndex[m.keep]||{}; const drop=m.ids.length-1; const ic=e.host?\`<img class="ci" src="https://icons.bitwarden.net/\${e.host}/icon.png" onerror="this.style.visibility='hidden'">\`:''; sec.appendChild($(\`<div class="crow">\${ic}<span class="grow"><span class="name">\${esc(e.name||m.keep)}</span><span class="host">merge \${m.ids.length} → 1 · \${drop} to Trash\${e.host?(' · '+esc(e.host)):''}</span></span></div>\`)); }); wrap.appendChild(sec); }
+  if(!icons.length&&!renames.length&&!deletes.length&&!merges.length) wrap.appendChild($('<p class="hint">No changes selected. Go back to pick some — or just close the tool, nothing will happen.</p>'));
   const actions=$('<div class="confirm-actions"></div>');
   const dl=$('<button class="dl">⬇ Download change record</button>'); dl.onclick=downloadRecord; actions.appendChild(dl);
-  const apply=$('<button class="primary apply">Apply changes</button>'); if(committed||(!icons.length&&!renames.length&&!deletes.length)) apply.disabled=true; apply.onclick=()=>commit(apply,dl); actions.appendChild(apply);
+  const apply=$('<button class="primary apply">Apply changes</button>'); if(committed||(!icons.length&&!renames.length&&!deletes.length&&!merges.length)) apply.disabled=true; apply.onclick=()=>commit(apply,dl); actions.appendChild(apply);
   wrap.appendChild(actions);
   if(committed) wrap.appendChild($('<p class="hint">These changes were already applied in this session. Reload the page to start a fresh pass.</p>'));
   wrap.appendChild($('<div class="result" id="commitresult"></div>'));
@@ -798,7 +807,8 @@ function buildRecord(){
   const icons=Object.entries(plan.icons).map(([id,cand])=>{ const e=iconIndex[id]||{}; return {id,name:e.name||null,host:e.host||null,oldIconUrl:e.iconUrl||null,newIconUri:'https://'+cand+'.favico.app',replacesExisting:e._sec==='s3'}; });
   const renames=Object.entries(plan.renames).map(([id,name])=>{ const e=renameIndex[id]||{}; return {id,oldName:e.current||null,newName:name}; });
   const deletes=Object.keys(plan.deletes).map(id=>{ const e=dupIndex[id]||{}; return {id,name:e.name||null,host:e.host||null,username:e.username||null}; });
-  return {tool:'favico × Bitwarden',generatedAt:new Date().toISOString(),note:'For your records — passwords are NOT included.',summary:{icons:icons.length,renames:renames.length,deletes:deletes.length},icons,renames,deletes,howToRevert:{icons:'Remove the *.favico.app URI from the entry, or use the Revert button in this tool.',renames:'Set the entry name back to oldName.',deletes:'Restore from Bitwarden Trash, run "bw restore item <id>", or re-import the encrypted backup.'}};
+  const merges=Object.values(plan.merges).map(m=>({keep:m.keep,ids:m.ids,toTrash:m.ids.filter(id=>id!==m.keep)}));
+  return {tool:'favico × Bitwarden',generatedAt:new Date().toISOString(),note:'For your records — passwords are NOT included.',summary:{icons:icons.length,renames:renames.length,merges:merges.length,deletes:deletes.length},icons,renames,merges,deletes,howToRevert:{icons:'Remove the *.favico.app URI from the entry, or use the Revert button in this tool.',renames:'Set the entry name back to oldName.',merges:'Merged-away copies are in Bitwarden Trash — restore them to undo a merge.',deletes:'Restore from Bitwarden Trash, run "bw restore item <id>", or re-import the encrypted backup.'}};
 }
 
 function downloadRecord(){
@@ -811,17 +821,18 @@ async function commit(apply,dl){
   const icons=Object.entries(plan.icons).map(([id,cand])=>({id,cand}));
   const renames=Object.entries(plan.renames).map(([id,name])=>({id,name}));
   const deletes=Object.keys(plan.deletes);
-  const total=icons.length+renames.length+deletes.length; if(!total)return;
+  const merges=Object.values(plan.merges);
+  const total=icons.length+renames.length+deletes.length+merges.length; if(!total)return;
   downloadRecord();
   apply.disabled=true; dl.disabled=true;
   const res=document.getElementById('commitresult');
   res.innerHTML='<div class="proc">⏳ Processing '+total+' change'+(total===1?'':'s')+'… don’t close this window.</div>';
   try{
-    const r=await (await fetch('/api/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({icons,renames,deletes,report:consent.report,synonyms:pendingSynonyms})})).json();
+    const r=await (await fetch('/api/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({icons,renames,deletes,merges,report:consent.report,synonyms:pendingSynonyms})})).json();
     const sum=a=>({ok:a.filter(x=>x.ok).length,n:a.length});
-    const si=sum(r.results.icons),sr=sum(r.results.renames),sd=sum(r.results.deletes);
-    const fails=[...r.results.icons,...r.results.renames,...r.results.deletes].filter(x=>!x.ok);
-    let html='<div class="done">✓ Done.</div><div class="summary"><span>Icons '+si.ok+'/'+si.n+'</span><span>Renames '+sr.ok+'/'+sr.n+'</span><span>Trash '+sd.ok+'/'+sd.n+'</span></div>';
+    const si=sum(r.results.icons),sr=sum(r.results.renames),sd=sum(r.results.deletes),sm=sum(r.results.merges||[]);
+    const fails=[...r.results.icons,...r.results.renames,...r.results.deletes,...(r.results.merges||[])].filter(x=>!x.ok);
+    let html='<div class="done">✓ Done.</div><div class="summary"><span>Icons '+si.ok+'/'+si.n+'</span><span>Renames '+sr.ok+'/'+sr.n+'</span><span>Merges '+sm.ok+'/'+sm.n+'</span><span>Trash '+sd.ok+'/'+sd.n+'</span></div>';
     if(fails.length) html+='<p class="err">'+fails.length+' failed:</p><ul>'+fails.map(f=>'<li class="err">'+esc(f.id)+': '+esc(f.error||'failed')+'</li>').join('')+'</ul>';
     html+='<p class="hint">Open Bitwarden and <b>Sync</b> to see the changes. Your change record was downloaded.</p>';
     res.innerHTML=html; committed=true;
