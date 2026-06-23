@@ -529,6 +529,7 @@ small{opacity:.6}
 .optrow .grow>div{white-space:normal;overflow:visible;text-overflow:clip}
 .optdesc{font-size:12px;opacity:.72;margin-top:3px;line-height:1.45}
 .dupgroup.willmerge{border-color:#16a34a}
+.iconok{font-size:12px;color:#16a34a;margin:-2px 0 8px 40px}
 .switch{position:relative;display:inline-block;width:44px;height:24px;flex:0 0 auto;cursor:pointer;margin-top:2px}
 .switch input{opacity:0;width:0;height:0}
 .switch .track{position:absolute;inset:0;background:#8886;border-radius:999px;transition:background .15s}
@@ -625,13 +626,14 @@ function renderIcons(key,opts){
 async function pickIcon(e, cell){
   const known=plan.icons[e.id]||'';
   const picked=await openPicker({ search:known, name:known });
-  if(!picked)return;
-  const setC=(cand)=>{ plan.icons[e.id]=cand; cell.innerHTML=\`<img src="https://\${cand}.favico.app/favicon.ico" onerror="this.style.visibility='hidden'">\`; };
-  if(picked.cand){ setC(picked.cand); return; }
+  if(!picked)return null;
+  const setC=(cand)=>{ plan.icons[e.id]=cand; cell.innerHTML=\`<img src="https://\${cand}.favico.app/favicon.ico" onerror="this.style.visibility='hidden'">\`; return cand; };
+  if(picked.cand){ return setC(picked.cand); }
   if(picked.upload){ const old=cell.innerHTML; cell.innerHTML='<span class="noicon">…</span>';
     try{ const res=await (await fetch('/api/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:picked.upload.name,dataUrl:picked.upload.dataUrl})})).json();
-      if(res.ok) setC(res.cand); else cell.innerHTML=old;
-    }catch{ cell.innerHTML=old; } }
+      if(res.ok) return setC(res.cand); else { cell.innerHTML=old; return null; }
+    }catch{ cell.innerHTML=old; return null; } }
+  return null;
 }
 
 function renderRenames(){
@@ -649,8 +651,9 @@ function renderRenames(){
     if(plan.icons[e.id]) cell.innerHTML=\`<img src="https://\${plan.icons[e.id]}.favico.app/favicon.ico" onerror="this.style.visibility='hidden'">\`;
     else if(e.host) cell.innerHTML=\`<img src="https://icons.bitwarden.net/\${e.host}/icon.png" onerror="this.style.visibility='hidden'">\`;
     else cell.innerHTML='<span class="noicon">?</span>';
-    row.querySelector('.change').onclick=()=>pickIcon(e, cell);
-    holder.appendChild(row);
+    const okmsg=$('<div class="iconok" hidden></div>');
+    row.querySelector('.change').onclick=async()=>{ const cand=await pickIcon(e, cell); if(cand){ okmsg.hidden=false; okmsg.innerHTML='✓ Icon updated to <b>'+esc(cand)+'.favico.app</b> — this applies on its own. Tick the box only if you also want to rename this entry.'; } };
+    const item=$('<div class="rnitem"></div>'); item.appendChild(row); item.appendChild(okmsg); holder.appendChild(item);
   }
   wrap.appendChild(holder);
   wrap.querySelector('.allchk').onchange=(ev)=>{ holder.querySelectorAll('.cr').forEach(c=>c.checked=ev.target.checked); refreshNav(); };
