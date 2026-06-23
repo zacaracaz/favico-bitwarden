@@ -113,6 +113,17 @@ const RENAME_MULTI = new Set(["com.au","co.uk","co.nz","com.br","co.jp","co.in",
 const GENERIC_SEG = new Set(["app","apps","android","androidapp","ios","mobile","client","prod","production","main","www","web","beta","release","free","lite","music","studio","core","ui","tv","game","games","cam","camera","battery","security","home","smart","smarthome","life","hub","connect","control","remote","watch","wear","health","fit","fitness","tracker","device","devices","scanner","manager","portal","account","login","auth"]);
 function splitWords(seg){ return (seg||"").replace(/[_-]+/g," ").replace(/([a-z])([A-Z])/g,"$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g,"$1 $2").trim(); }
 function titleCase(s){ return splitWords(s).split(/\s+/).filter(Boolean).map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(" "); }
+// Identity-provider login domains: the brand lives in the tenant subdomain, not here.
+const IDP_DOMAINS = new Set(["b2clogin.com","okta.com","oktapreview.com","okta-emea.com","auth0.com","onelogin.com","microsoftonline.com","pingone.com"]);
+// Pull a brand out of a tenant label like "prodcompassionaub2c" → "compassion".
+function cleanTenant(t){
+  let x=(t||"").toLowerCase();
+  x=x.replace(/^(production|prod|development|dev|staging|stage|stg|sandbox|sbx|preprod|nonprod|test|tst|uat|qa|demo|int)/,"");
+  let p; do{ p=x; x=x.replace(/(b2clogin|b2c|signin|login|sso|oauth|auth|tenant|idp|aad|ad)$/,""); }while(x!==p);
+  const m=x.match(/^(.*?)(usa|au|us|uk|gb|eu|nz|ca|in|sg|za|ie|de|fr|es|it|jp|cn|hk|br|mx)$/); // peel a trailing region code
+  if(m && m[1].length>=4) x=m[1];
+  return x;
+}
 function suggestClean(raw){
   let s=(raw||"").trim();
   if(!s || /\s/.test(s)) return null;            // already has spaces → looks human
@@ -130,6 +141,11 @@ function suggestClean(raw){
     const li=parts.length-1;
     if(parts.length>=4 && parts[li].length>2 && !GENERIC_SEG.has(parts[li])) brand=partsOrig[li];
     else brand=parts[1];
+  } else if(IDP_DOMAINS.has(parts.slice(-2).join(".")) && parts.length>=3){
+    // identity-provider login domain (Azure B2C, Okta, Auth0…) — the brand is the
+    // tenant subdomain, not the provider. e.g. prodcompassionaub2c.b2clogin.com
+    const cleaned=cleanTenant(parts[0]);
+    brand = cleaned.length>=3 ? cleaned : parts[0];
   } else {
     const last2=parts.slice(-2).join(".");
     const idx=(RENAME_MULTI.has(last2)&&parts.length>=3)?parts.length-3:parts.length-2;
