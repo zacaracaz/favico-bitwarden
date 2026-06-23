@@ -385,10 +385,6 @@ const server = http.createServer(async (req, res) => {
       });
       return send(res, 200, { groups });
     }
-    if (req.method === "POST" && url.pathname === "/api/merge") {
-      const { ids = [] } = await readJson(req);
-      try { return send(res, 200, { ok: true, ...mergeItems(ids) }); } catch (e) { return send(res, 400, { ok: false, error: e.message }); }
-    }
     if (req.method === "POST" && url.pathname === "/api/commit") {
       const { icons = [], renames = [], deletes = [], merges = [], report = false, synonyms = [] } = await readJson(req);
       const results = { icons: [], renames: [], deletes: [], merges: [] };
