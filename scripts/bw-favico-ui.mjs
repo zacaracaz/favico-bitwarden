@@ -33,6 +33,9 @@ const FAVICO = "https://www.favico.app";
 const ROOT = "favico.app";
 const BW_ICONS = "https://icons.bitwarden.net";
 const MATCH_NEVER = 5;
+// Per-run token: the served page carries it and every /api call must echo it.
+// Stops a random website (or DNS rebinding) from driving the local server.
+const UI_TOKEN = crypto.randomBytes(18).toString("hex");
 
 // favico funnel mark — served locally so the tool's own tab shows the brand icon (no network needed)
 const ICON_SVG = `<svg id="Layer_1" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 600 600">
@@ -339,7 +342,12 @@ function readJson(req) { return new Promise((resolve) => { let b = ""; req.on("d
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   try {
-    if (req.method === "GET" && url.pathname === "/") return send(res, 200, HTML, "text/html");
+    // DNS-rebinding guard: only accept loopback Host headers.
+    const hostName = (req.headers.host || "").split(":")[0];
+    if (hostName !== "localhost" && hostName !== "127.0.0.1") return send(res, 403, { error: "bad host" });
+    // CSRF guard: every /api call must echo the per-run token, which only our own page knows.
+    if (url.pathname.startsWith("/api/") && req.headers["x-favico-token"] !== UI_TOKEN) return send(res, 403, { error: "forbidden" });
+    if (req.method === "GET" && url.pathname === "/") return send(res, 200, HTML.replace("__UI_TOKEN__", UI_TOKEN), "text/html");
     if (req.method === "GET" && (url.pathname === "/favicon.svg" || url.pathname === "/favicon.ico")) return send(res, 200, ICON_SVG, "image/svg+xml");
     if (req.method === "GET" && url.pathname === "/api/data") return send(res, 200, SECTIONS);
     if (req.method === "GET" && url.pathname === "/api/search") {
@@ -537,6 +545,9 @@ small{opacity:.6}
 </ul></details>
 <div id="app">Loading your vault…</div>
 <script>
+const T='__UI_TOKEN__';
+const _fetch=window.fetch.bind(window);
+window.fetch=(u,o)=>{ o=o||{}; if(typeof u==='string'&&u[0]==='/'){ o.headers={...(o.headers||{}),'x-favico-token':T}; } return _fetch(u,o); };
 const $=(h)=>{const t=document.createElement('template');t.innerHTML=h.trim();return t.content.firstChild};
 let data;
 let plan={icons:{},renames:{},deletes:{}}, cur=0, visited={}, committed=false;
