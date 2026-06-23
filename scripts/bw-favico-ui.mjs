@@ -481,6 +481,12 @@ const server = http.createServer(async (req, res) => {
       res.end();
       return;
     }
+    if (req.method === "POST" && url.pathname === "/api/quit") {
+      send(res, 200, { ok: true });
+      console.error("\n  ✓ All done — favico is shutting down. You can close the browser tab.");
+      setTimeout(() => process.exit(0), 150);
+      return;
+    }
     if (req.method === "POST" && url.pathname === "/api/revert") {
       const n = revertAll();
       await classify(); // refresh sections after removing favico URIs
@@ -597,6 +603,9 @@ small{opacity:.6}
 .pdet{font:inherit;font-size:12px;padding:2px 8px}
 .plog{max-height:200px;overflow:auto;font-size:12px;margin:8px 0;padding-left:20px}
 .plog li{margin:2px 0}.plog li.ok{color:#16a34a}.plog li.bad{color:#dc2626}
+.tally{display:flex;flex-direction:column;gap:3px;margin:12px 0;font-size:14px;font-weight:600}
+.pactions{margin-top:16px;display:flex;justify-content:flex-end}
+.pclose{font-size:14px;padding:8px 16px}
 .switch{position:relative;display:inline-block;width:44px;height:24px;flex:0 0 auto;cursor:pointer;margin-top:2px}
 .switch input{opacity:0;width:0;height:0}
 .switch .track{position:absolute;inset:0;background:#8886;border-radius:999px;transition:background .15s}
@@ -613,7 +622,7 @@ small{opacity:.6}
 <li>Sent to <b>Bitwarden's own icon service</b> (icons.bitwarden.net): each entry's <b>domain</b>, to check whether it already has a favicon. (Bitwarden already stores your vault.)</li>
 <li>Sent to <b>favico.app</b>: brand-name guesses derived from your domains (to find matching icons), anything you type in a <b>search</b> box, and any <b>image you choose/upload</b> (to store as an icon).</li>
 <li><b>Icons you upload or pick from a web search are saved on the favico.app server</b> (they must be, so Bitwarden can fetch them) and added to the <b>shared, searchable library</b> so others with the same site benefit. They hold only the image and the short name you give it — <b>no vault data</b>.</li>
-<li><b>Rename hints:</b> the tool <b>downloads</b> a public list of community "old name → new name" suggestions to improve renaming (nothing is sent to fetch it). It only <b>sends</b> your own <code>old → new</code> pairs if you turn on the "share renames" toggle — never identifiers, URLs, or secrets.</li>
+<li><b>Community hints (opt-in, anonymous):</b> the tool <b>downloads</b> a public list of "old name → new name" and "site → icon" suggestions to improve matching (nothing is sent to fetch it). Only if you turn on the "help improve matching" toggle does it <b>send</b> generic <code>old → new</code> renames, which icon you picked for a site, and icon-usage counts. This is <b>fully anonymised</b> — no account, email, device or user identifier, no URLs and no secrets — so it <b>cannot be linked to you or your Bitwarden account</b>.</li>
 <li><b>Duplicate detection</b> runs entirely on this machine and only looks at each login's <b>site and username</b> — never the password. Anything you choose to remove is <b>soft-deleted to Bitwarden's Trash</b> (recoverable), not erased.</li>
 <li>Stays local: all <b>edits, renames, deletions, and the encrypted backup</b> go only between this machine and Bitwarden via the CLI — favico.app never sees them.</li>
 <li>It's <b>open source</b> — you can read exactly what it does.</li>
@@ -811,7 +820,7 @@ function renderConfirm(){
   wrap.appendChild($('<p class="hint">Review everything below. <b>Nothing has changed in your vault yet</b> — changes apply only when you click Apply.</p>'));
   wrap.appendChild($(\`<div class="summary"><span><b>\${icons.length}</b> icon\${icons.length===1?'':'s'}</span><span><b>\${renames.length}</b> rename\${renames.length===1?'':'s'}</span><span><b>\${merges.length}</b> merge\${merges.length===1?'':'s'}</span><span><b>\${deletes.length}</b> to Trash</span></div>\`));
   if(icons.length){ const sec=$('<div class="csec"><h3>Icons</h3></div>'); icons.forEach(([id,cand])=>{ const r=renameIndex[id]; const e=iconIndex[id]||dupIndex[id]||(r?{name:r.current,host:r.host}:null)||{}; const rep=e._sec==='s3'; sec.appendChild($(\`<div class="crow"><img class="ci" src="https://\${cand}.favico.app/favicon.ico" onerror="this.style.visibility='hidden'"><span class="grow"><span class="name">\${esc(e.name||id)}</span><span class="host">\${rep?'replace':'add'} → \${esc(cand)}.favico.app\${e.host?(' · '+esc(e.host)):''}</span></span></div>\`)); }); wrap.appendChild(sec); }
-  if(renames.length){ const sec=$('<div class="csec"><h3>Renames</h3></div>'); renames.forEach(([id,name])=>{ const e=renameIndex[id]||{}; sec.appendChild($(\`<div class="crow"><span class="grow"><span class="name">\${esc(name)}</span><span class="host">was: \${esc(e.current||'')}</span></span></div>\`)); }); wrap.appendChild(sec); }
+  if(renames.length){ const sec=$('<div class="csec"><h3>Renames</h3></div>'); renames.forEach(([id,name])=>{ const e=renameIndex[id]||{}; const cand=plan.icons[id]; const ic=cand?\`<img class="ci" src="https://\${cand}.favico.app/favicon.ico" onerror="this.style.visibility='hidden'">\`:(e.host?\`<img class="ci" src="https://icons.bitwarden.net/\${e.host}/icon.png" onerror="this.style.visibility='hidden'">\`:''); sec.appendChild($(\`<div class="crow">\${ic}<span class="grow"><span class="name">\${esc(name)}</span><span class="host">was: \${esc(e.current||'')}</span></span></div>\`)); }); wrap.appendChild(sec); }
   if(deletes.length){ const sec=$('<div class="csec"><h3>Move to Trash</h3></div>'); sec.appendChild($('<p class="hint">Recoverable from Bitwarden Trash, <code>bw restore item &lt;id&gt;</code>, or your encrypted backup.</p>')); deletes.forEach(id=>{ const e=dupIndex[id]||{}; sec.appendChild($(\`<div class="crow"><span class="grow"><span class="name">\${esc(e.name||id)}</span><span class="host">\${esc(e.username||'no username')}\${e.host?(' · '+esc(e.host)):''}</span></span></div>\`)); }); wrap.appendChild(sec); }
   if(merges.length){ const sec=$('<div class="csec"><h3>Merges</h3></div>'); sec.appendChild($('<p class="hint">Each group becomes one entry (web addresses combined); the extra copies move to Trash (recoverable).</p>')); merges.forEach(m=>{ const e=dupIndex[m.keep]||{}; const drop=m.ids.length-1; const ic=e.host?\`<img class="ci" src="https://icons.bitwarden.net/\${e.host}/icon.png" onerror="this.style.visibility='hidden'">\`:''; sec.appendChild($(\`<div class="crow">\${ic}<span class="grow"><span class="name">\${esc(e.name||m.keep)}</span><span class="host">merge \${m.ids.length} → 1 · \${drop} to Trash\${e.host?(' · '+esc(e.host)):''}</span></span></div>\`)); }); wrap.appendChild(sec); }
   if(!icons.length&&!renames.length&&!deletes.length&&!merges.length) wrap.appendChild($('<p class="hint">No changes selected. Go back to pick some — or just close the tool, nothing will happen.</p>'));
@@ -891,39 +900,42 @@ async function commit(apply,dl){
   const total=icons.length+renames.length+deletes.length+merges.length; if(!total)return;
   downloadRecord();
   apply.disabled=true; dl.disabled=true;
-  const res=document.getElementById('commitresult');
-  res.innerHTML='<div class="proc"><div class="pbar"><div class="pfill"></div></div><div class="pmeta"><span class="ppct">0%</span><span class="pcur">Starting…</span><button class="pdet">Show details</button></div><ul class="plog" hidden></ul><div class="phint">Working… please don’t close this window.</div></div>';
-  const fill=res.querySelector('.pfill'),pct=res.querySelector('.ppct'),cur=res.querySelector('.pcur'),log=res.querySelector('.plog'),det=res.querySelector('.pdet');
+  const bg=$('<div class="modal-bg"></div>');
+  bg.innerHTML='<div class="modal" style="width:520px"><h3 class="ptitle">Applying your changes…</h3><div class="pbar"><div class="pfill"></div></div><div class="pmeta"><span class="ppct">0%</span><span class="pcur">Starting…</span><button class="pdet">Show details</button></div><ul class="plog" hidden></ul><div class="psummary"></div><div class="phint">Working… please don’t close this window.</div><div class="pactions"></div></div>';
+  document.body.appendChild(bg);
+  const q=(s)=>bg.querySelector(s);
+  const fill=q('.pfill'),pct=q('.ppct'),cur=q('.pcur'),log=q('.plog'),det=q('.pdet'),ptitle=q('.ptitle'),psum=q('.psummary'),phint=q('.phint'),pact=q('.pactions');
   det.onclick=()=>{ log.hidden=!log.hidden; det.textContent=log.hidden?'Show details':'Hide details'; };
-  let results=null;
+  let results=null, finished=false;
   function onEvent(e){
     if(e.type==='doing'){ cur.textContent=e.label; }
     else if(e.type==='done_item'){ const p=e.total?Math.round(e.done/e.total*100):100; fill.style.width=p+'%'; pct.textContent=p+'%';
       const li=document.createElement('li'); li.className=e.ok?'ok':'bad'; li.textContent=(e.ok?'✓ ':'✗ ')+e.label+(e.ok?'':' — '+(e.error||'failed')); log.appendChild(li); log.scrollTop=log.scrollHeight; }
-    else if(e.type==='done'){ results=e.results; fill.style.width='100%'; pct.textContent='100%'; cur.textContent='Done'; renderSummary(); }
-    else if(e.type==='error'){ results=e.results||results; cur.innerHTML='<span class="err">'+esc(e.error||'failed')+'</span>'; renderSummary(); }
+    else if(e.type==='done'){ results=e.results; fill.style.width='100%'; pct.textContent='100%'; cur.textContent='Done'; finishUp(); }
+    else if(e.type==='error'){ results=e.results||results; cur.innerHTML='<span class="err">'+esc(e.error||'failed')+'</span>'; finishUp(); }
   }
-  function renderSummary(){
-    if(committed) return; committed=true;
+  function finishUp(){
+    if(finished) return; finished=true; committed=true;
     const r=results||{icons:[],renames:[],deletes:[],merges:[]};
     const sum=a=>({ok:(a||[]).filter(x=>x.ok).length,n:(a||[]).length});
     const si=sum(r.icons),sr=sum(r.renames),sd=sum(r.deletes),sm=sum(r.merges);
-    const fails=[...(r.icons||[]),...(r.renames||[]),...(r.deletes||[]),...(r.merges||[])].filter(x=>!x.ok);
-    let h='<div class="done">✓ Applied.</div><div class="summary"><span>Icons '+si.ok+'/'+si.n+'</span><span>Renames '+sr.ok+'/'+sr.n+'</span><span>Merges '+sm.ok+'/'+sm.n+'</span><span>Trash '+sd.ok+'/'+sd.n+'</span></div>';
-    if(fails.length) h+='<p class="err">'+fails.length+' failed — open “Show details” above to see which.</p>';
-    h+='<p class="hint">Open Bitwarden and <b>Sync</b> to see the changes. Your change record was downloaded.</p>';
-    const box=document.createElement('div'); box.innerHTML=h; res.insertBefore(box,res.firstChild);
-    const ph=res.querySelector('.phint'); if(ph) ph.remove();
+    const nf=(si.n-si.ok)+(sr.n-sr.ok)+(sd.n-sd.ok)+(sm.n-sm.ok);
+    ptitle.textContent=nf?'Done — with some errors':'All done ✓';
+    psum.innerHTML='<div class="tally"><span>Icons '+si.ok+'/'+si.n+'</span><span>Renames '+sr.ok+'/'+sr.n+'</span><span>Merges '+sm.ok+'/'+sm.n+'</span><span>Trash '+sd.ok+'/'+sd.n+'</span></div>'+(nf?'<p class="err">'+nf+' failed — open “Show details”.</p>':'')+'<p class="hint">Open Bitwarden and <b>Sync</b> to see the changes. Your change record was downloaded.</p>';
+    phint.remove();
+    const close=$('<button class="primary pclose">All done — close this window</button>');
+    close.onclick=()=>{ fetch('/api/quit',{method:'POST'}).catch(()=>{}); window.close(); setTimeout(()=>{ pact.innerHTML='<p class="hint">The tool has stopped — you can safely close this tab.</p>'; },350); };
+    pact.appendChild(close);
   }
   try{
     const resp=await fetch('/api/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({icons,renames,deletes,merges,report:consent.report,synonyms:pendingSynonyms})});
-    if(!resp.body){ const r=await resp.json(); results=r.results; renderSummary(); return; }
+    if(!resp.body){ const r=await resp.json(); results=r.results; finishUp(); return; }
     const reader=resp.body.getReader(),dec=new TextDecoder(); let buf='';
     for(;;){ const {value,done}=await reader.read(); if(done) break; buf+=dec.decode(value,{stream:true});
       let nl; while((nl=buf.indexOf('\\n'))>=0){ const line=buf.slice(0,nl).trim(); buf=buf.slice(nl+1); if(line) onEvent(JSON.parse(line)); } }
     const tail=buf.trim(); if(tail) onEvent(JSON.parse(tail));
-    if(!committed) renderSummary();
-  }catch(e){ res.innerHTML='<div class="err">Apply failed: '+esc(e.message||'error')+'. Check Bitwarden to see what applied.</div>'; apply.disabled=false; dl.disabled=false; }
+    if(!finished) finishUp();
+  }catch(e){ cur.innerHTML='<span class="err">Apply failed: '+esc(e.message||'error')+'</span>'; phint.textContent='Check Bitwarden to see what applied.'; const c=$('<button class="pclose">Close</button>'); c.onclick=()=>bg.remove(); pact.appendChild(c); apply.disabled=false; dl.disabled=false; }
 }
 // Unified icon picker: three clearly-separated ways to choose an icon.
 // Resolves { cand } for a library pick (already exists), or { upload:{name,dataUrl} }

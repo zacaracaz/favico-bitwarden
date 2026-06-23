@@ -105,6 +105,10 @@ Nothing is written to your vault until the final **Apply** step.
 - Icons you **upload or pick from a web search are stored on the favico.app
   server** and added to its shared, searchable library (by design, for reuse) —
   they contain only the image and the short name you give it, **no vault data**.
+- Anything shared to **improve matching for everyone is opt-in and fully anonymous**
+  — generic rename hints, which icon you pick for a site, and icon-usage counts. It
+  carries **no account, email, device or user identifier, no URLs and no secrets**,
+  so it **cannot be linked to you or your Bitwarden account**.
 
 ## Verify it yourself
 
