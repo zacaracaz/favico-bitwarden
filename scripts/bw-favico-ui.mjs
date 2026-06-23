@@ -110,7 +110,7 @@ function backupVault() {
 const TLDISH = new Set(["com","org","net","io","app","co","dev","me","gov","edu","info","biz","tv","ai","xyz","studio","online","site","cloud"]);
 const RENAME_MULTI = new Set(["com.au","co.uk","co.nz","com.br","co.jp","co.in","com.sg","co.za","com.mx","org.uk","net.au","org.au"]);
 // Words that are too generic to be the brand if they're the last package segment.
-const GENERIC_SEG = new Set(["app","apps","android","androidapp","ios","mobile","client","prod","production","main","www","web","beta","release","free","lite","music","studio","core","ui","tv","game","games"]);
+const GENERIC_SEG = new Set(["app","apps","android","androidapp","ios","mobile","client","prod","production","main","www","web","beta","release","free","lite","music","studio","core","ui","tv","game","games","cam","camera","battery","security","home","smart","smarthome","life","hub","connect","control","remote","watch","wear","health","fit","fitness","tracker","device","devices","scanner","manager","portal","account","login","auth"]);
 function splitWords(seg){ return (seg||"").replace(/[_-]+/g," ").replace(/([a-z])([A-Z])/g,"$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g,"$1 $2").trim(); }
 function titleCase(s){ return splitWords(s).split(/\s+/).filter(Boolean).map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(" "); }
 function suggestClean(raw){
