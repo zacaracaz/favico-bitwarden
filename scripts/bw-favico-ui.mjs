@@ -109,17 +109,28 @@ function backupVault() {
 // Suggest a cleaner display name for URL/package-style entry names.
 const TLDISH = new Set(["com","org","net","io","app","co","dev","me","gov","edu","info","biz","tv","ai","xyz","studio","online","site","cloud"]);
 const RENAME_MULTI = new Set(["com.au","co.uk","co.nz","com.br","co.jp","co.in","com.sg","co.za","com.mx","org.uk","net.au","org.au"]);
-function titleCase(s){ return s.split(/[-_]+/).filter(Boolean).map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(" "); }
+// Words that are too generic to be the brand if they're the last package segment.
+const GENERIC_SEG = new Set(["app","apps","android","androidapp","ios","mobile","client","prod","production","main","www","web","beta","release","free","lite","music","studio","core","ui","tv","game","games"]);
+function splitWords(seg){ return (seg||"").replace(/[_-]+/g," ").replace(/([a-z])([A-Z])/g,"$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g,"$1 $2").trim(); }
+function titleCase(s){ return splitWords(s).split(/\s+/).filter(Boolean).map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(" "); }
 function suggestClean(raw){
   let s=(raw||"").trim();
   if(!s || /\s/.test(s)) return null;            // already has spaces → looks human
-  s=s.replace(/^[a-z][a-z0-9+.-]*:\/\//i,"").split("/")[0].split("?")[0].split(":")[0].toLowerCase();
+  s=s.replace(/^[a-z][a-z0-9+.-]*:\/\//i,"").split("/")[0].split("?")[0].split(":")[0];
   if(!s.includes(".")) return null;
-  const parts=s.split(".").filter(Boolean);
+  const partsOrig=s.split(".").filter(Boolean);
+  const parts=partsOrig.map((p)=>p.toLowerCase());
   if(parts.length<2) return null;
   let brand, suffix="";
-  if(TLDISH.has(parts[0])){ brand=parts[1]; }    // reverse-DNS package, e.g. com.picsart.studio
-  else {
+  if(TLDISH.has(parts[0])){
+    // reverse-DNS package id. tld.vendor[.generic] → vendor (e.g. com.picsart.studio
+    // → Picsart). But a longer tld.publisher.platform.App, e.g.
+    // com.netflix.NGP.WorldofGooHD, is the *App*, not the publisher → use the last
+    // segment (keeping its original case so camelCase splits into words).
+    const li=parts.length-1;
+    if(parts.length>=4 && parts[li].length>2 && !GENERIC_SEG.has(parts[li])) brand=partsOrig[li];
+    else brand=parts[1];
+  } else {
     const last2=parts.slice(-2).join(".");
     const idx=(RENAME_MULTI.has(last2)&&parts.length>=3)?parts.length-3:parts.length-2;
     if(idx<0) return null;
