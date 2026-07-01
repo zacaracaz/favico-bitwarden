@@ -40,13 +40,13 @@ Along the way it can also suggest cleaner entry names and flag likely-duplicate 
 ## Get it
 
 **Easiest — download the ZIP (no tools needed):** on this
-[GitHub page](https://github.com/zacaracaz/favico-bitwarden), click the green
+[GitHub page](https://github.com/zacaracaz/favico-app), click the green
 **`<> Code`** button → **Download ZIP**, then unzip it.
 
 **Or clone it (if you have git):**
 
 ```bash
-git clone https://github.com/zacaracaz/favico-bitwarden.git
+git clone https://github.com/zacaracaz/favico-app.git
 ```
 
 Then open the folder and follow **Run it** below.
@@ -124,8 +124,8 @@ grep -niE "password" scripts/bw-favico-ui.mjs       # never sent over the networ
 
 ## Feedback & bugs
 
-- **Ideas, questions, general feedback** → [GitHub Discussions](https://github.com/zacaracaz/favico-bitwarden/discussions)
-- **Bugs / something broke** → [GitHub Issues](https://github.com/zacaracaz/favico-bitwarden/issues)
+- **Ideas, questions, general feedback** → [GitHub Discussions](https://github.com/zacaracaz/favico-app/discussions)
+- **Bugs / something broke** → [GitHub Issues](https://github.com/zacaracaz/favico-app/issues)
 - **Security issues** → see [SECURITY.md](SECURITY.md) (please report privately)
 
 ## License & name
